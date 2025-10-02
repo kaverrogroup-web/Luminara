@@ -136,9 +136,8 @@ if page == "Dashboard":
 
 elif page == "Planet Pairs":
     st.title("Planet Pairs")
-    elif page == "Planet Pairs":
+    
     # ---------------- Planet Pairs ----------------
-    st.title("Planet Pairs")
     st.caption("Scan for upcoming harmonic angles between two bodies (geocentric / tropical).")
 
     # --- Inputs ---
