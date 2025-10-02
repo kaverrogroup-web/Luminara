@@ -84,6 +84,100 @@ st.set_page_config(
     layout="wide",
 )
 
+# -------------- Theme (single consolidated block) --------------
+st.markdown(
+    """
+    <style>
+    :root{
+        --bg: #f8f9fa;            /* app background */
+        --text: #1c1c1c;          /* main text */
+        --panel: #ffffff;         /* cards/panels */
+        --border: #e6e6e6;        /* soft borders */
+        --accent: #7BAE7F;        /* forest green pastel */
+        --accent-hover: #6a9c6d;  /* darker hover */
+        --accent-soft: #d3e2d6;   /* very light green */
+    }
+
+    /* ---------- App shell ---------- */
+    .stApp{
+        background-color: var(--bg) !important;
+        color: var(--text);
+        font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    /* Sidebar */
+    section[data-testid="stSidebar"]{
+        background-color: var(--panel) !important;
+        border-right: 1px solid var(--border);
+    }
+
+    /* Titles */
+    h1, h2, h3, h4{
+        color: var(--text);
+        font-weight: 600;
+        letter-spacing: .2px;
+    }
+
+    /* ---------- Buttons & controls ---------- */
+    .stButton > button{
+        background-color: var(--accent) !important;
+        color: #fff !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: .55em 1.25em !important;
+        box-shadow: 0 1px 0 rgba(0,0,0,.03);
+    }
+    .stButton > button:hover{
+        background-color: var(--accent-hover) !important;
+    }
+
+    /* Inputs */
+    .stTextInput input,
+    .stDateInput input,
+    .stNumberInput input,
+    .stSelectbox div[data-baseweb="select"]{
+        background-color: var(--panel);
+        border: 1px solid #dcdcdc;
+        border-radius: 8px;
+        padding: .5em .75em;
+    }
+
+    /* Dividers */
+    hr{
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.25rem 0;
+    }
+
+    /* ---------- Tables ---------- */
+    .stTable{
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background-color: var(--panel);
+        overflow: hidden;
+    }
+    .stTable table tr:nth-child(even){
+        background-color: #fafafa;
+    }
+
+    /* ---------- Metrics ---------- */
+    [data-testid="stMetricValue"]{
+        color: var(--accent) !important;
+        font-weight: 600;
+    }
+
+    /* ---------- Scrollbars (desktop) ---------- */
+    *::-webkit-scrollbar{ height:10px; width:10px; }
+    *::-webkit-scrollbar-thumb{ background: var(--accent-soft); border-radius:8px; }
+    *::-webkit-scrollbar-thumb:hover{ background:#c3d7c8; }
+
+    /* ---------- Hide Streamlit chrome ---------- */
+    #MainMenu, footer { visibility: hidden; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # -------------- Utilities --------------
 def section_header(title: str, subtitle: str | None = None) -> None:
     st.markdown(f"### {title}")
