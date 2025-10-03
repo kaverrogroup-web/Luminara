@@ -325,6 +325,16 @@ def main():
     with st.sidebar:
         st.markdown("### Configuration")
         
+        # Mode selection
+        mode = st.radio(
+            "Mode",
+            options=["Harmonics", "Fingerprint"],
+            index=0,
+            help="Harmonics: scan predefined angles. Fingerprint: scan for recurrence of a specific planetary angle."
+        )
+        
+        st.markdown("---")
+        
         # Planet selection
         planets = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 
                    'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto']
@@ -334,14 +344,42 @@ def main():
         
         st.markdown("---")
         
-        # Harmonic angles
-        st.markdown("**Harmonic Angles**")
-        angle_options = [0, 45, 60, 90, 120, 135, 180, 270, 360]
-        selected_angles = st.multiselect(
-            'Select angles (degrees)',
-            options=angle_options,
-            default=[0, 45, 60, 90, 120, 135, 180, 270, 360]
-        )
+        # Mode-specific inputs
+        if mode == "Harmonics":
+            # Harmonic angles
+            st.markdown("**Harmonic Angles**")
+            angle_options = [0, 45, 60, 90, 120, 135, 180, 270, 360]
+            selected_angles = st.multiselect(
+                'Select angles (degrees)',
+                options=angle_options,
+                default=[0, 45, 60, 90, 120, 135, 180, 270, 360]
+            )
+        else:
+            # Fingerprint mode - anchor datetime
+            st.markdown("**Anchor DateTime (UTC)**")
+            anchor_date = st.date_input(
+                'Anchor Date',
+                datetime.now().date(),
+                help="Date to capture the planetary fingerprint"
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                anchor_hour = st.number_input(
+                    'Hour (0-23)',
+                    min_value=0,
+                    max_value=23,
+                    value=12,
+                    step=1
+                )
+            with col2:
+                anchor_minute = st.number_input(
+                    'Minute (0-59)',
+                    min_value=0,
+                    max_value=59,
+                    value=0,
+                    step=1
+                )
         
         st.markdown("---")
         
@@ -381,13 +419,28 @@ def main():
             st.error("Please select two different planets.")
             return
         
-        if not selected_angles:
+        if mode == "Harmonics" and not selected_angles:
             st.error("Please select at least one harmonic angle.")
             return
         
         if start_date >= end_date:
             st.error("End date must be after start date.")
             return
+        
+        # Determine target angles based on mode
+        if mode == "Fingerprint":
+            # Calculate anchor angle
+            anchor_dt = datetime.combine(anchor_date, datetime.min.time())
+            anchor_dt = anchor_dt.replace(hour=anchor_hour, minute=anchor_minute)
+            anchor_t = ts.from_datetime(anchor_dt.replace(tzinfo=None))
+            
+            anchor_angle = angle_between_ecliptic_longitudes_deg(eph, ts, planet1, planet2, anchor_t)
+            target_angles = [anchor_angle]
+            
+            # Display fingerprint info
+            st.info(f"**Fingerprint target angle:** {anchor_angle:.2f}° (captured at {anchor_dt.strftime('%Y-%m-%d %H:%M')} UTC)")
+        else:
+            target_angles = selected_angles
         
         # Convert dates to datetime
         start_dt = datetime.combine(start_date, datetime.min.time())
@@ -397,26 +450,30 @@ def main():
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown('<div class="card-title">Harmonic Timing Results</div>', unsafe_allow_html=True)
         
-        with st.spinner('Calculating planetary harmonics with precision refinement...'):
+        mode_label = "fingerprint recurrence" if mode == "Fingerprint" else "planetary harmonics"
+        with st.spinner(f'Calculating {mode_label} with precision refinement...'):
             results_df = scan_harmonic_timing_refined(
-                eph, ts, planet1, planet2, selected_angles, orb,
+                eph, ts, planet1, planet2, target_angles, orb,
                 start_dt, end_dt, step_minutes
             )
         
         if len(results_df) > 0:
-            st.success(f"Found {len(results_df)} harmonic event(s) (refined to second precision)")
+            event_type = "recurrence event(s)" if mode == "Fingerprint" else "harmonic event(s)"
+            st.success(f"Found {len(results_df)} {event_type} (refined to second precision)")
             st.dataframe(results_df, use_container_width=True, hide_index=True)
             
             # Download button
             csv = results_df.to_csv(index=False)
+            file_prefix = "fingerprint" if mode == "Fingerprint" else "harmonics"
             st.download_button(
                 label="Download Results (CSV)",
                 data=csv,
-                file_name=f"luminara_harmonics_{planet1}_{planet2}_{datetime.now().strftime('%Y%m%d')}.csv",
+                file_name=f"luminara_{file_prefix}_{planet1}_{planet2}_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
         else:
-            st.warning("No harmonic events found in the selected date range.")
+            event_type = "fingerprint recurrence events" if mode == "Fingerprint" else "harmonic events"
+            st.warning(f"No {event_type} found in the selected date range.")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -425,14 +482,26 @@ def main():
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown('<div class="card-title">Welcome to Luminara</div>', unsafe_allow_html=True)
         st.markdown("""
-        Configure your harmonic scan in the sidebar and click **Run Harmonic Scan** to begin.
+        Configure your scan in the sidebar and click **Run Harmonic Scan** to begin.
         
-        **Features:**
+        **Two Modes Available:**
+        
+        **Harmonics Mode:**
+        - Scan for predefined harmonic angles (0°, 45°, 60°, 90°, etc.)
+        - Select multiple angles to detect simultaneously
+        - Classic astrological aspects and divisions
+        
+        **Fingerprint Mode:**
+        - Capture the exact planetary angle at a specific moment (anchor datetime)
+        - Scan forward to find when that exact angle recurs
+        - Perfect for identifying cyclical patterns and timing repetitions
+        
+        **Technical Features:**
         - High-precision planetary ephemeris (JPL DE421)
         - Geocentric ecliptic longitudes (tropical)
         - Golden-section refinement for second-level accuracy
         - Bracket-and-refine algorithm eliminates grid snapping
-        - Multiple harmonic angles with custom orb tolerance
+        - Custom orb tolerance and scan step size
         
         **How It Works:**
         1. Coarse scan divides time range into brackets (step size)
