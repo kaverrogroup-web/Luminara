@@ -204,14 +204,15 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
                     )
                     
                     if diff_best <= orb:
-                        results.append({
+                        result_entry = {
                             'timestamp': t_best.utc_datetime(),
                             'datetime_str': t_best.utc_strftime('%Y-%m-%d %H:%M:%S'),
                             'planet1': planet1,
                             'planet2': planet2,
-                            'target': target_angle,
-                            'delta': diff_best
-                        })
+                            'target': float(target_angle),
+                            'delta': float(diff_best)
+                        }
+                        results.append(result_entry)
                 except Exception:
                     continue
         
@@ -228,6 +229,10 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
     progress_bar.empty()
     status_text.empty()
     
+    # Debug: show raw results count before deduplication
+    if len(results) > 0:
+        st.info(f"Raw results before deduplication: {len(results)}")
+    
     if results:
         results_sorted = sorted(results, key=lambda x: x['timestamp'])
         deduped = [results_sorted[0]]
@@ -236,12 +241,28 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
             if (r['timestamp'] - deduped[-1]['timestamp']).total_seconds() > 30:
                 deduped.append(r)
         
+        # Debug: show deduped count
+        st.info(f"Results after deduplication: {len(deduped)}")
+        
+        # Build DataFrame with explicit column ordering
         df = pd.DataFrame(deduped)
+        
+        # Debug: show dataframe shape
+        st.info(f"DataFrame shape: {df.shape}")
+        
+        # Reorder and rename columns
         df = df[['datetime_str', 'planet1', 'planet2', 'target', 'delta']]
         df.columns = ['DateTime (UTC)', 'Planet 1', 'Planet 2', 'Target (°)', 'Δ (deg)']
+        
+        # Format the delta column
         df['Δ (deg)'] = df['Δ (deg)'].apply(lambda x: f"{x:.4f}")
+        
+        # Format target angle
+        df['Target (°)'] = df['Target (°)'].apply(lambda x: f"{x:.1f}" if isinstance(x, (int, float)) else str(x))
+        
         return df
     
+    # Return empty DataFrame with proper structure
     return pd.DataFrame(columns=['DateTime (UTC)', 'Planet 1', 'Planet 2', 'Target (°)', 'Δ (deg)'])
 
 # ============================================================================
@@ -453,8 +474,11 @@ def main():
         if len(results_df) > 0:
             event_type = "recurrence event(s)" if st.session_state.mode == "Fingerprint" else "harmonic event(s)"
             st.success(f"Found {len(results_df)} {event_type} (refined to second precision)")
+            
+            # Display the dataframe
             st.dataframe(results_df, use_container_width=True, hide_index=True)
             
+            # Download button
             csv = results_df.to_csv(index=False)
             file_prefix = "fingerprint" if st.session_state.mode == "Fingerprint" else "harmonics"
             st.download_button(
@@ -466,6 +490,10 @@ def main():
         else:
             event_type = "fingerprint recurrence events" if st.session_state.mode == "Fingerprint" else "harmonic events"
             st.warning(f"No {event_type} found in the selected date range.")
+            
+            # Show empty dataframe with proper structure
+            empty_df = pd.DataFrame(columns=['DateTime (UTC)', 'Planet 1', 'Planet 2', 'Target (°)', 'Δ (deg)'])
+            st.dataframe(empty_df, use_container_width=True, hide_index=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
     
