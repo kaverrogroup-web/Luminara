@@ -169,7 +169,7 @@ def angle_diff_to_target_deg(eph, ts, planet1, planet2, t, target):
 # ============================================================================
 
 def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
-                           max_iter=20, tol_seconds=2.0):
+                           max_iter=15, tol_seconds=3.0):
     """
     Golden-section search in [t_lo, t_hi] that returns (t_best, diff_best_deg).
     
@@ -180,8 +180,8 @@ def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
     Parameters:
     - t_lo, t_hi: Skyfield Time objects defining search bracket
     - target: target harmonic angle in degrees
-    - max_iter: maximum iterations (reduced default to 20)
-    - tol_seconds: stop when interval < this many seconds (increased to 2.0)
+    - max_iter: maximum iterations (reduced to 15 for speed)
+    - tol_seconds: stop when interval < this many seconds (increased to 3.0)
     
     Returns:
     - t_best: Skyfield Time object at minimum
@@ -292,22 +292,23 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
             # Quick check: is midpoint within reasonable proximity?
             mid_diff = angle_diff_to_target_deg(eph, ts, planet1, planet2, t_mid, target_angle)
             
+            # Skip refinement if not close enough - more aggressive filtering
+            if mid_diff > orb * 2.0:
+                continue
+            
             # Check both endpoints too for better bracket detection
             lo_diff = angle_diff_to_target_deg(eph, ts, planet1, planet2, t_lo, target_angle)
             hi_diff = angle_diff_to_target_deg(eph, ts, planet1, planet2, t_hi, target_angle)
             
             min_diff_in_bracket = min(mid_diff, lo_diff, hi_diff)
             
-            # More conservative threshold: only refine if clearly within range
-            # Use step_minutes to scale threshold (wider steps = wider threshold)
-            bracket_threshold = max(orb * 1.5, step_minutes / 60.0)
-            
-            if min_diff_in_bracket < bracket_threshold:
+            # Only refine if clearly within range
+            if min_diff_in_bracket <= orb * 1.5:
                 # Refine this bracket
                 try:
                     t_best, diff_best = refine_hit_time_golden(
                         eph, ts, planet1, planet2, t_lo, t_hi, target_angle,
-                        max_iter=20, tol_seconds=2.0
+                        max_iter=15, tol_seconds=3.0
                     )
                     
                     # Only record if within actual orb
@@ -410,7 +411,8 @@ def main():
             selected_angles = st.multiselect(
                 'Select angles (degrees)',
                 options=angle_options,
-                default=[0, 45, 60, 90, 120, 135, 180, 270, 360]
+                default=[0, 90, 180],
+                help="Fewer angles = faster scan. Start with 3-4 angles for testing."
             )
         else:
             # Fingerprint mode - anchor datetime
