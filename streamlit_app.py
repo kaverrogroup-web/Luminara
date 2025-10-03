@@ -262,7 +262,7 @@ st.sidebar.divider()
 st.sidebar.markdown(f"**UTC:** {utc_now_iso()}")
 
 # -------------- Pages --------------
-if page == "Dashboard":
+if st.session_state.page == "Dashboard":
     st.title("Luminara")
     st.caption("Astro-financial analytics dashboard")
 
@@ -285,7 +285,7 @@ if page == "Dashboard":
         """
     )
 
-elif page == "Planet Pairs":
+elif st.session_state.page == "Planet Pairs":
     st.title("Planet Pairs")
     
     # ---------------- Planet Pairs ----------------
