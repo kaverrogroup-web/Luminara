@@ -229,10 +229,6 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
     progress_bar.empty()
     status_text.empty()
     
-    # Debug: show raw results count before deduplication
-    if len(results) > 0:
-        st.info(f"Raw results before deduplication: {len(results)}")
-    
     if results:
         results_sorted = sorted(results, key=lambda x: x['timestamp'])
         deduped = [results_sorted[0]]
@@ -241,14 +237,8 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
             if (r['timestamp'] - deduped[-1]['timestamp']).total_seconds() > 30:
                 deduped.append(r)
         
-        # Debug: show deduped count
-        st.info(f"Results after deduplication: {len(deduped)}")
-        
         # Build DataFrame with explicit column ordering
         df = pd.DataFrame(deduped)
-        
-        # Debug: show dataframe shape
-        st.info(f"DataFrame shape: {df.shape}")
         
         # Reorder and rename columns
         df = df[['datetime_str', 'planet1', 'planet2', 'target', 'delta']]
@@ -471,12 +461,18 @@ def main():
                 target_angles, st.session_state.orb, start_dt, end_dt, st.session_state.step_minutes
             )
         
-        if len(results_df) > 0:
+        # Always show results regardless of count
+        if results_df is not None and len(results_df) > 0:
             event_type = "recurrence event(s)" if st.session_state.mode == "Fingerprint" else "harmonic event(s)"
             st.success(f"Found {len(results_df)} {event_type} (refined to second precision)")
             
-            # Display the dataframe
-            st.dataframe(results_df, use_container_width=True, hide_index=True)
+            # Force display with explicit configuration
+            st.dataframe(
+                results_df,
+                use_container_width=True,
+                hide_index=True,
+                height=min(400, 35 * len(results_df) + 38)  # Dynamic height
+            )
             
             # Download button
             csv = results_df.to_csv(index=False)
