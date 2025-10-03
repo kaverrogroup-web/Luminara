@@ -363,7 +363,7 @@ def main():
             'Coarse Step (minutes)', 
             min_value=5, 
             max_value=240, 
-            value=60,
+            value=15,
             help="Initial bracket size. Smaller = tighter brackets, faster refinement."
         )
         
