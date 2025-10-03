@@ -169,7 +169,7 @@ def angle_diff_to_target_deg(eph, ts, planet1, planet2, t, target):
 # ============================================================================
 
 def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
-                           max_iter=30, tol_seconds=1.0):
+                           max_iter=20, tol_seconds=2.0):
     """
     Golden-section search in [t_lo, t_hi] that returns (t_best, diff_best_deg).
     
@@ -180,8 +180,8 @@ def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
     Parameters:
     - t_lo, t_hi: Skyfield Time objects defining search bracket
     - target: target harmonic angle in degrees
-    - max_iter: maximum iterations
-    - tol_seconds: stop when interval < this many seconds
+    - max_iter: maximum iterations (reduced default to 20)
+    - tol_seconds: stop when interval < this many seconds (increased to 2.0)
     
     Returns:
     - t_best: Skyfield Time object at minimum
@@ -195,6 +195,12 @@ def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
     # Skyfield .utc_datetime() returns timezone-aware datetime
     a = t_lo.utc_datetime().timestamp()
     b = t_hi.utc_datetime().timestamp()
+    
+    # Safety check: don't refine if bracket is too small
+    if (b - a) < tol_seconds:
+        t_mid = ts.from_datetime(datetime.fromtimestamp((a + b) / 2, tz=timezone.utc))
+        diff_mid = angle_diff_to_target_deg(eph, ts, planet1, planet2, t_mid, target)
+        return t_mid, diff_mid
     
     # Initial probe points
     x1 = a + resphi * (b - a)
@@ -211,7 +217,7 @@ def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
     f1 = angle_diff_to_target_deg(eph, ts, planet1, planet2, t1, target)
     f2 = angle_diff_to_target_deg(eph, ts, planet1, planet2, t2, target)
     
-    for _ in range(max_iter):
+    for iteration in range(max_iter):
         if (b - a) < tol_seconds:
             break
         
@@ -286,31 +292,44 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
             # Quick check: is midpoint within reasonable proximity?
             mid_diff = angle_diff_to_target_deg(eph, ts, planet1, planet2, t_mid, target_angle)
             
-            # Use a wider threshold for bracketing (2x orb + some margin)
-            bracket_threshold = orb * 2.5
+            # Check both endpoints too for better bracket detection
+            lo_diff = angle_diff_to_target_deg(eph, ts, planet1, planet2, t_lo, target_angle)
+            hi_diff = angle_diff_to_target_deg(eph, ts, planet1, planet2, t_hi, target_angle)
             
-            if mid_diff < bracket_threshold:
+            min_diff_in_bracket = min(mid_diff, lo_diff, hi_diff)
+            
+            # More conservative threshold: only refine if clearly within range
+            # Use step_minutes to scale threshold (wider steps = wider threshold)
+            bracket_threshold = max(orb * 1.5, step_minutes / 60.0)
+            
+            if min_diff_in_bracket < bracket_threshold:
                 # Refine this bracket
-                t_best, diff_best = refine_hit_time_golden(
-                    eph, ts, planet1, planet2, t_lo, t_hi, target_angle
-                )
-                
-                # Only record if within actual orb
-                if diff_best <= orb:
-                    results.append({
-                        'timestamp': t_best.utc_datetime(),
-                        'datetime_str': t_best.utc_strftime('%Y-%m-%d %H:%M:%S'),
-                        'planet1': planet1,
-                        'planet2': planet2,
-                        'target': target_angle,
-                        'delta': diff_best
-                    })
+                try:
+                    t_best, diff_best = refine_hit_time_golden(
+                        eph, ts, planet1, planet2, t_lo, t_hi, target_angle,
+                        max_iter=20, tol_seconds=2.0
+                    )
+                    
+                    # Only record if within actual orb
+                    if diff_best <= orb:
+                        results.append({
+                            'timestamp': t_best.utc_datetime(),
+                            'datetime_str': t_best.utc_strftime('%Y-%m-%d %H:%M:%S'),
+                            'planet1': planet1,
+                            'planet2': planet2,
+                            'target': target_angle,
+                            'delta': diff_best
+                        })
+                except Exception:
+                    # Skip this bracket if refinement fails
+                    continue
         
-        # Progress update
+        # Progress update (update every 10th iteration to reduce overhead)
         minutes_processed += step_minutes
-        progress = min(minutes_processed / total_minutes, 1.0)
-        progress_bar.progress(progress)
-        status_text.text(f"Scanning: {current_dt.strftime('%Y-%m-%d %H:%M')} ({int(progress*100)}%)")
+        if minutes_processed % (step_minutes * 10) < step_minutes or current_dt >= end_date:
+            progress = min(minutes_processed / total_minutes, 1.0)
+            progress_bar.progress(progress)
+            status_text.text(f"Scanning: {current_dt.strftime('%Y-%m-%d %H:%M')} ({int(progress*100)}%)")
         
         # Advance to next bracket
         current_dt = next_dt
@@ -429,8 +448,16 @@ def main():
         
         # Date range
         st.markdown("**Date Range (UTC)**")
-        start_date = st.date_input('Start Date', datetime.now().date())
-        end_date = st.date_input('End Date', (datetime.now() + timedelta(days=90)).date())
+        start_date = st.date_input(
+            'Start Date (UTC)', 
+            datetime.now(timezone.utc).date(),
+            help="All times are in UTC"
+        )
+        end_date = st.date_input(
+            'End Date (UTC)', 
+            (datetime.now(timezone.utc) + timedelta(days=90)).date(),
+            help="All times are in UTC"
+        )
         
         st.markdown("---")
         
