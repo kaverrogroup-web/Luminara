@@ -468,10 +468,9 @@ def main():
         
         # Determine target angles based on mode
         if mode == "Fingerprint":
-            # Calculate anchor angle
-            anchor_dt = datetime.combine(anchor_date, datetime.min.time())
-            anchor_dt = anchor_dt.replace(hour=anchor_hour, minute=anchor_minute)
-            anchor_t = ts.from_datetime(anchor_dt.replace(tzinfo=None))
+            # Calculate anchor angle - create UTC-aware datetime
+            anchor_dt = date_to_utc_datetime(anchor_date, anchor_hour, anchor_minute)
+            anchor_t = ts.from_datetime(anchor_dt)
             
             anchor_angle = angle_between_ecliptic_longitudes_deg(eph, ts, planet1, planet2, anchor_t)
             target_angles = [anchor_angle]
@@ -481,9 +480,9 @@ def main():
         else:
             target_angles = selected_angles
         
-        # Convert dates to datetime
-        start_dt = datetime.combine(start_date, datetime.min.time())
-        end_dt = datetime.combine(end_date, datetime.max.time())
+        # Convert dates to UTC-aware datetimes
+        start_dt = date_to_utc_datetime(start_date, 0, 0, 0)
+        end_dt = date_to_utc_datetime(end_date, 23, 59, 59)
         
         # Run scan
         st.markdown('<div class="card">', unsafe_allow_html=True)
