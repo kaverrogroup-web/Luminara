@@ -80,14 +80,17 @@ def get_ephemeris():
 def _planet_obj(eph, planet_name: str):
     """
     Return a Skyfield planet object from a human name.
-    Handles DE421 barycenters → .planet automatically.
+    Handles DE421 barycenters gracefully (use .planet if available).
     """
     key = _DE421_KEY.get(planet_name.lower())
     if key is None:
         raise ValueError(f"Unknown planet name: {planet_name}")
     body = eph[key]
-    if "barycenter" in key:
-        body = body.planet
+    if "barycenter" in key and hasattr(body, "planet"):
+        try:
+            body = body.planet
+        except Exception:
+            pass  # fallback: keep barycenter if .planet not available
     return body
 
 
