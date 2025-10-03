@@ -1,17 +1,18 @@
 # streamlit_app.py
+# Luminara — UI skeleton with light sidebar, robust nav, and Bento grid layout
+
 import streamlit as st
 from datetime import datetime, timezone
-from functools import lru_cache
-from typing import Iterable, Tuple
+from contextlib import contextmanager
 
-# ================= App Config =================
+# -------------------------------- App config --------------------------------
 st.set_page_config(
     page_title="Luminara",
-    page_icon="🪐",
+    page_icon="🌌",
     layout="wide",
 )
 
-# ---------------- Utilities ----------------
+# ------------------------------- Small utils --------------------------------
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -20,358 +21,315 @@ def section_header(title: str, subtitle: str | None = None) -> None:
     if subtitle:
         st.caption(subtitle)
 
-# ================= Global Theme (light + forest accents) =================
+# ------------------------------- Global CSS ---------------------------------
+# Light sidebar + tab-style active state + soft app chrome
 st.markdown("""
 <style>
-/* App base */
-.stApp {
-  background: #f8f9fa;  /* very light gray */
-  color: #1c1c1c;
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", "Apple Color Emoji","Segoe UI Emoji";
-}
-h1,h2,h3,h4 { color:#1c1c1c; }
+/* App background */
+.stApp { background:#f8f9fa; color:#1c1c1c; }
 
-/* Accent palette */
-:root {
-  --accent-deep: #0f5132;     /* deep forest green */
-  --accent:      #2e7d6b;     /* primary buttons */
-  --accent-soft: #e9f2ee;     /* very soft green */
-  --border:      #e6eaee;     /* soft borders */
-}
+/* Remove that little white square some browsers show for missing images */
+img[alt="Logo"] { display:none; }
 
-/* -------- Sidebar (light, tab-like list) -------- */
+/* Sidebar: light, with subtle borders and a tab-like active item */
 section[data-testid="stSidebar"] {
-  background: #ffffff;
-  border-right: 1px solid var(--border);
+  background:#ffffff !important;
+  border-right:1px solid #e6e6e6;
 }
-section[data-testid="stSidebar"] .block-container { padding-top: .9rem; }
+.sidebar-header { padding: 12px 8px 6px; }
+.sidebar-title   { font-weight:700; font-size:1.05rem; margin-bottom:2px; }
+.sidebar-sub     { font-size:.85rem; color:#6b7280; }
 
-/* Radio -> list items (hide dots, style rows) */
-section[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] input { display:none; }
-section[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  padding: 10px 12px;
-  margin: 3px 2px;
-  cursor: pointer;
-  display: block;
-  transition: background .12s, border-color .12s, box-shadow .12s;
+/* Menu list */
+.menu-group { margin-top: 10px; }
+.menu-item button[kind="secondary"] {
+  width:100%;
+  justify-content:flex-start;
+  background:#ffffff;
+  border:1px solid #e9ecef;
+  color:#1c1c1c;
+  padding:7px 10px;
+  border-radius:10px;
 }
-section[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label:hover {
-  background: #f3f4f6;
-  border-color: var(--border);
+.menu-item button[kind="secondary"]:hover {
+  border-color:#d7dce1;
+  background:#fafafa;
 }
-/* Active tab pill (Streamlit adds data-selected="true" on the label) */
-section[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label[data-selected="true"] {
-  background: #ffffff;
-  border: 1px solid #e9edf1;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-}
-
-/* Sidebar headings */
-.st-sidebar-title { font-weight:700; letter-spacing:.2px; font-size:1.05rem; margin-bottom:.3rem; }
-.st-sidebar-caption { color:#6b7280; margin-bottom:.65rem; }
-
-/* Divider */
-hr { border:none; border-top:1px solid #edf0f2; }
-
-/* -------- Bento grid + cards (applies across all pages) -------- */
-.bento-row { margin: 8px 0 14px 0; }
-
-/* First child in each column -> card */
-.bento-row [data-testid="column"] > div:first-child {
-  background: #ffffff;
-  border-radius: 14px;
-  padding: 16px 16px 14px 16px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-  border: 1px solid #eef0f3;
+.menu-item.active button[kind="secondary"]{
+  background:#f1f5f9;
+  border-color:#cfd6dd;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.02);
+  font-weight:700;
 }
 
-/* Card internals */
-.bento-row h2, .bento-row h3, .bento-row h4 { margin: 0 0 10px 0; }
-.bento-row p { margin: 0; }
-.bento-row hr { border: none; border-top: 1px solid #edf0f2; margin: 10px 0 12px 0; width: 100%; }
-
-/* Metrics accent inside cards */
-.bento-row [data-testid="stMetricValue"] { color: var(--accent-deep); font-weight: 700; }
-
-/* Tables in cards */
-.bento-row table tr:nth-child(even) { background: #fafbfc; }
-.bento-row table { border-radius: 8px; overflow: hidden; }
-
-/* Buttons (primary) */
-.stButton>button {
-  background-color: var(--accent);
-  color: #fff;
-  border-radius: 10px;
-  border: none;
-  padding: 0.55rem 0.9rem;
+/* UTC clock at bottom */
+.sidebar-foot {
+  padding: 10px 6px 14px;
+  font-size:.8rem;
+  color:#6b7280;
+  border-top:1px solid #eef0f2;
+  margin-top:14px;
 }
-.stButton>button:hover { background-color: #266a5b; }
 
-/* Inputs */
-.stTextInput input, .stDateInput input, .stSelectbox div, .stNumberInput input {
-  border-radius: 8px !important;
+/* Page titles */
+h1, .stMarkdown h1 { letter-spacing:.2px; }
+
+/* ----------------------- Bento grid (12 columns) ------------------------ */
+.bento-grid{
+  display:grid;
+  grid-template-columns: repeat(12, minmax(0,1fr));
+  gap:14px;
+  align-items:start;
+}
+.bento-card{
+  background:#ffffff;
+  border:1px solid #e6e6e6;
+  border-radius:14px;
+  padding:14px 16px;
+  box-shadow:0 1px 0 rgba(0,0,0,.02);
+}
+.bento-title{ font-weight:700; font-size:1.05rem; margin-bottom:8px; }
+.bento-sub  { color:#6b7280; font-size:.9rem; margin:-2px 0 8px; }
+
+/* Soft table borders inside cards */
+.bento-card table{
+  border-collapse:separate !important;
+  border-spacing:0;
+  width:100%;
+}
+.bento-card th, .bento-card td{
+  border-top:1px solid #efefef !important;
+}
+.bento-card thead th{
+  border-top:none !important;
+  color:#6b7280; font-weight:600;
+}
+.bento-card tr:last-child td{
+  border-bottom:1px solid #efefef !important;
+}
+
+/* Responsive stacking */
+@media (max-width: 1100px){
+  .span-12 { grid-column: span 12 !important; }
+  .span-8  { grid-column: span 12 !important; }
+  .span-6  { grid-column: span 12 !important; }
+  .span-4  { grid-column: span 12 !important; }
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ================= Ephemeris helpers (stubbed; ready to wire) =================
-try:
-    from skyfield.api import load  # make sure skyfield is in requirements.txt
-except Exception:
-    load = None
+# ------------------------ Bento helpers (one-time) ---------------------------
+def bento_open():
+    st.markdown('<div class="bento-grid">', unsafe_allow_html=True)
 
-@st.cache_resource(show_spinner=False)
-def get_ephemeris():
-    """Load small JPL ephemeris (cached)."""
-    if load is None:
-        return None, None
-    return load("de421.bsp"), load.timescale()
+def bento_close():
+    st.markdown('</div>', unsafe_allow_html=True)
 
-def wrap_angle_deg(x: float) -> float:
-    return x % 360.0
+@contextmanager
+def bento_card(span: int, title: str = "", subtitle: str | None = None):
+    st.markdown(
+        f'<div class="bento-card span-{span}" style="grid-column: span {span};">', 
+        unsafe_allow_html=True
+    )
+    if title:
+        st.markdown(f'<div class="bento-title">{title}</div>', unsafe_allow_html=True)
+    if subtitle:
+        st.markdown(f'<div class="bento-sub">{subtitle}</div>', unsafe_allow_html=True)
+    try:
+        yield
+    finally:
+        st.markdown('</div>', unsafe_allow_html=True)
 
-def min_angle_diff(a: float, b: float) -> float:
-    return abs((a - b + 180.0) % 360.0 - 180.0)
-
-def nearest_target_delta(angle: float, targets: Iterable[float]) -> Tuple[float, float]:
-    best = (9999.0, None)
-    for t in targets:
-        d = min_angle_diff(angle, t)
-        if d < best[0]:
-            best = (d, t)
-    return best  # (diff, target)
-
-# ================= Sidebar (text-only, tab-like) =================
+# ------------------------------- Navigation ---------------------------------
 PAGES = ["Dashboard", "Planet Pairs", "Backlog", "Settings", "About"]
+
+# Initialize selected page if first load
 if "page" not in st.session_state:
     st.session_state.page = PAGES[0]
 
+# Sidebar (pure text, no collapse, light look)
 with st.sidebar:
-    st.markdown('<div class="st-sidebar-title">Luminara</div>', unsafe_allow_html=True)
-    st.markdown('<div class="st-sidebar-caption">Astro-financial analytics</div>', unsafe_allow_html=True)
-    page_choice = st.radio("", PAGES, index=PAGES.index(st.session_state.page), key="__menu__")
-    st.markdown("---")
-    st.caption(f"UTC: {utc_now_iso()}")
+    st.markdown('<div class="sidebar-header">', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-title">Luminara</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-sub">Astro-financial analytics</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-page = page_choice
-st.session_state.page = page
+    st.markdown("#### Menu")
+    for name in PAGES:
+        active = (st.session_state.page == name)
+        c = st.container()
+        with c:
+            st.markdown(
+                f'<div class="menu-item {"active" if active else ""}">', 
+                unsafe_allow_html=True
+            )
+            if st.button(name, key=f"nav_{name}", type="secondary"):
+                st.session_state.page = name
+            st.markdown('</div>', unsafe_allow_html=True)
 
-# ================= Pages (all bento-styled) =================
+    st.markdown(f'<div class="sidebar-foot">UTC: {utc_now_iso()}</div>', unsafe_allow_html=True)
+
+page = st.session_state.page  # convenience alias
+
+# --------------------------------- Pages ------------------------------------
+# 1) Dashboard (Bento)
 if page == "Dashboard":
     st.title("Luminara")
     st.caption("Astro-financial analytics dashboard")
 
-    # ---------- BENTO ROW 1: [8 | 4] ----------
-    st.markdown('<div class="bento-row">', unsafe_allow_html=True)
-    c1, c2 = st.columns([8, 4], gap="small")
+    bento_open()
+    # Row 1 — 6 + 6
+    with bento_card(6, "Overview"):
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("Upcoming hits", "3")
+        with c2: st.metric("Active pairs", "5")
+        with c3: st.metric("Watch window", "7–21d")
 
-    with c1:
-        box = st.container()
-        with box:
-            st.subheader("Overview")
-            m1, m2, m3 = st.columns(3)
-            with m1: st.metric("Upcoming hits", 3)
-            with m2: st.metric("Active pairs", 5)
-            with m3: st.metric("Watch window", "7–21d")
-            st.markdown("<hr/>", unsafe_allow_html=True)
-            st.write("Recent timing signals (sample)")
-            st.table(
-                [{"Date (UTC)": "2025-10-03", "Pair": "Sun–Moon", "Angle": "90°", "Orb": "0.2°"},
-                 {"Date (UTC)": "2025-10-06", "Pair": "Venus–Saturn", "Angle": "120°", "Orb": "0.8°"},
-                 {"Date (UTC)": "2025-10-11", "Pair": "Mars–Jupiter", "Angle": "60°", "Orb": "0.5°"}]
-            )
+        st.markdown("#### Recent timing signals (sample)")
+        st.dataframe(
+            [
+                {"Date (UTC)": "2025-10-03", "Pair": "Sun–Moon",     "Angle": "90°",  "Orb": "0.2°"},
+                {"Date (UTC)": "2025-10-06", "Pair": "Venus–Saturn", "Angle": "120°", "Orb": "0.8°"},
+                {"Date (UTC)": "2025-10-11", "Pair": "Mars–Jupiter", "Angle": "60°",  "Orb": "0.5°"},
+            ],
+            use_container_width=True,
+            hide_index=True
+        )
 
-    with c2:
-        box = st.container()
-        with box:
-            st.subheader("Next harmonics")
-            st.write("Nearest matching angles in the next 30 days (sample).")
-            st.table(
-                [{"When (UTC)": "Oct 03 14:00", "Pair": "Sun–Moon", "Angle": "90°", "Δ": "0.2°"},
-                 {"When (UTC)": "Oct 07 09:30", "Pair": "Mercury–Mars", "Angle": "45°", "Δ": "0.4°"},
-                 {"When (UTC)": "Oct 12 18:15", "Pair": "Jupiter–Saturn", "Angle": "120°", "Δ": "0.7°"}]
-            )
-    st.markdown("</div>", unsafe_allow_html=True)
+    with bento_card(6, "Next harmonics", "Nearest matching angles in the next 30 days (sample)."):
+        st.dataframe(
+            [
+                {"When (UTC)":"Oct 03 14:00","Pair":"Sun–Moon",     "Angle":"90°","Δ":"0.2°"},
+                {"When (UTC)":"Oct 07 09:30","Pair":"Mercury–Mars","Angle":"45°","Δ":"0.4°"},
+                {"When (UTC)":"Oct 12 18:15","Pair":"Jupiter–Saturn","Angle":"120°","Δ":"0.7°"},
+            ],
+            use_container_width=True,
+            hide_index=True
+        )
 
-    # ---------- BENTO ROW 2: [5 | 7] ----------
-    st.markdown('<div class="bento-row">', unsafe_allow_html=True)
-    c3, c4 = st.columns([5, 7], gap="small")
+    # Row 2 — 8 + 4
+    with bento_card(8, "Your notes"):
+        st.caption("Quick scratchpad for ideas (not persisted yet).")
+        st.text_area(" ", placeholder="Observations, hypotheses, to-dos…", label_visibility="hidden", height=160)
 
-    with c3:
-        box = st.container()
-        with box:
-            st.subheader("Your notes")
-            st.write("Quick scratchpad for ideas (not persisted yet).")
-            st.text_area("Notes", placeholder="Observations, hypotheses, to-dos…",
-                         label_visibility="collapsed", height=140)
+    with bento_card(4, "Watchlist (sample)"):
+        st.dataframe(
+            [
+                {"Asset":"XAUUSD","Focus pair":"Sun–Moon",     "Angles":"0, 90, 180","Window":"Action"},
+                {"Asset":"ES",    "Focus pair":"Venus–Saturn", "Angles":"60, 120",   "Window":"Watch"},
+                {"Asset":"BTCUSD","Focus pair":"Mars–Jupiter", "Angles":"45, 135",   "Window":"Radar"},
+            ],
+            use_container_width=True,
+            hide_index=True
+        )
+    bento_close()
 
-    with c4:
-        box = st.container()
-        with box:
-            st.subheader("Watchlist (sample)")
-            st.table(
-                [{"Asset": "XAUUSD", "Focus pair": "Sun–Moon",     "Angles": "0, 90, 180", "Window": "Action"},
-                 {"Asset": "ES",     "Focus pair": "Venus–Saturn", "Angles": "60, 120",    "Window": "Watch"},
-                 {"Asset": "BTCUSD", "Focus pair": "Mars–Jupiter", "Angles": "45, 135",    "Window": "Radar"}]
-            )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.caption(f"**UTC:** {utc_now_iso()}")
-
+# 2) Planet Pairs (Bento)
 elif page == "Planet Pairs":
     st.title("Planet Pairs")
     st.caption("Find upcoming harmonic angles between two planets (geocentric tropical).")
 
-    # ---------- BENTO ROW 1: Controls card ----------
-    st.markdown('<div class="bento-row">', unsafe_allow_html=True)
-    c1 = st.columns([12], gap="small")[0]
-    with c1:
-        card = st.container()
-        with card:
-            st.subheader("Parameters")
-            r1c1, r1c2, r1c3, r1c4 = st.columns([1,1,1,2])
-            with r1c1:
-                planet1 = st.selectbox("Planet 1",
-                    ["Sun","Moon","Mercury","Venus","Mars","Jupiter","Saturn","Uranus","Neptune","Pluto"])
-            with r1c2:
-                planet2 = st.selectbox("Planet 2",
-                    ["Sun","Moon","Mercury","Venus","Mars","Jupiter","Saturn","Uranus","Neptune","Pluto"], index=1)
-            with r1c3:
-                frame = st.selectbox("Frame",
-                    ["Geocentric / Ecliptic (Tropical)", "Heliocentric / Ecliptic", "Geocentric / Right Ascension"], index=0)
-            with r1c4:
-                angles = st.multiselect("Harmonic Angles (deg)",
-                    [0,30,45,60,72,90,120,135,144,150,180,225,240,270,315,330,360],
-                    default=[0,60,90,120,180])
+    bento_open()
 
-            r2c1, r2c2, r2c3 = st.columns(3)
-            with r2c1:
-                start_date = st.date_input("Start date (UTC)", value=datetime.utcnow().date())
-            with r2c2:
-                end_date   = st.date_input("End date (UTC)",
-                                           value=datetime.utcnow().date().replace(year=datetime.utcnow().year + 1))
-            with r2c3:
-                orb = st.number_input("Orb (± degrees)", min_value=0.0, max_value=5.0, value=1.0, step=0.1)
+    with bento_card(12, "Parameters"):
+        left, mid1, mid2, right = st.columns([1.2, 1.0, 1.0, 1.0])
+        with left:
+            planet1 = st.selectbox("Planet 1", ["Sun","Moon","Mercury","Venus","Mars","Jupiter","Saturn","Uranus","Neptune","Pluto"])
+        with mid1:
+            planet2 = st.selectbox("Planet 2", ["Sun","Moon","Mercury","Venus","Mars","Jupiter","Saturn","Uranus","Neptune","Pluto"], index=1)
+        with mid2:
+            coordinate = st.selectbox("Frame", ["Geocentric / Ecliptic (Tropical)", "Heliocentric / Ecliptic", "Geocentric / Right Ascension"], index=0)
+        with right:
+            angles = st.multiselect(
+                "Harmonic Angles (deg)",
+                [0,30,45,60,72,90,120,135,144,150,180,225,240,270,315,330,360],
+                default=[0,60,90,120,180],
+            )
 
-            st.markdown("<hr/>", unsafe_allow_html=True)
-            run = st.button("Compute")
+        lo, hi, orbcol = st.columns(3)
+        with lo:
+            start_date = st.date_input("Start date (UTC)", value=datetime.utcnow().date())
+        with hi:
+            end_date = st.date_input("End date (UTC)", value=datetime.utcnow().date().replace(year=datetime.utcnow().year + 1))
+        with orbcol:
+            orb = st.number_input("Orb (± degrees)", min_value=0.0, max_value=5.0, value=1.0, step=0.1)
 
-    st.markdown("</div>", unsafe_allow_html=True)
+        run = st.button("Compute", type="primary")
 
-    # ---------- BENTO ROW 2: Results card ----------
-    st.markdown('<div class="bento-row">', unsafe_allow_html=True)
-    c2 = st.columns([12], gap="small")[0]
-    with c2:
-        card = st.container()
-        with card:
-            st.subheader("Results")
-            if run:
-                st.info("Computation engine not wired yet. Next step: integrate Skyfield ephemerides and search for hits.")
-                st.code(
-                    f"""Params:
-- Planet 1: {planet1}
-- Planet 2: {planet2}
-- Frame:    {frame}
-- Angles:   {angles}
-- Orb:      ±{orb}°
-- Range:    {start_date} → {end_date} (UTC)""",
-                    language="yaml",
-                )
-            else:
-                st.write("Configure parameters above and press **Compute** to scan for harmonic hits.")
-    st.markdown("</div>", unsafe_allow_html=True)
+    with bento_card(12, "Results"):
+        if not run:
+            st.info("Click **Compute** to search for hits (ephemeris engine comes in next step).")
+        else:
+            st.success("Parameters captured. Next step: integrate Skyfield search.")
+            st.json({
+                "planet1": planet1,
+                "planet2": planet2,
+                "frame": coordinate,
+                "angles": angles,
+                "orb": orb,
+                "range": [str(start_date), str(end_date)],
+            })
+    bento_close()
 
+# 3) Backlog (Bento)
 elif page == "Backlog":
     st.title("Backlog")
     st.caption("Log which assets reacted on which harmonic dates—build your private knowledge base.")
 
-    # ---------- BENTO ROW: [Form | Recent] ----------
-    st.markdown('<div class="bento-row">', unsafe_allow_html=True)
-    left, right = st.columns([6,6], gap="small")
+    bento_open()
+    with bento_card(6, "Add entry"):
+        with st.form("log_form", clear_on_submit=True):
+            asset = st.text_input("Asset / Symbol", placeholder="e.g., XAUUSD")
+            date  = st.date_input("Event date (UTC)")
+            pat   = st.text_input("Planet Pair / Pattern", placeholder="e.g., Sun–Moon 90°")
+            note  = st.text_area("Notes", placeholder="What happened? Reaction type/strength? Price context?")
+            submitted = st.form_submit_button("Add entry")
+        if submitted:
+            st.success("Entry captured (mock). Next step: wire to SQLite using SQLAlchemy.")
 
-    with left:
-        card = st.container()
-        with card:
-            st.subheader("New entry")
-            st.info("Storage not wired yet; this is a mock to shape the UX.")
-            with st.form("log_form", clear_on_submit=True):
-                asset = st.text_input("Asset / Symbol", placeholder="e.g., XAUUSD")
-                date  = st.date_input("Event date (UTC)")
-                planets = st.text_input("Planet Pair / Pattern", placeholder="e.g., Sun–Moon 90°")
-                note  = st.text_area("Notes", placeholder="What happened? Reaction type/strength? Price context?")
-                submitted = st.form_submit_button("Add entry")
-            if submitted:
-                st.success("Entry captured (mock). Next: wire to SQLite using SQLAlchemy.")
+    with bento_card(6, "Recent entries"):
+        st.caption("This will show your persisted backlog once storage is wired.")
+        st.table([{"Date (UTC)":"—","Asset":"—","Pattern":"—","Notes":"—"}])
+    bento_close()
 
-    with right:
-        card = st.container()
-        with card:
-            st.subheader("Recent entries")
-            st.caption("This will show your persisted backlog once storage is wired.")
-            st.table([{"Date (UTC)": "—", "Asset": "—", "Pattern": "—", "Notes": "—"}])
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
+# 4) Settings (Bento)
 elif page == "Settings":
     st.title("Settings")
     st.caption("App-wide configuration")
 
-    # ---------- BENTO ROW: [Defaults | Time & locale] ----------
-    st.markdown('<div class="bento-row">', unsafe_allow_html=True)
-    a, b = st.columns([6,6], gap="small")
+    bento_open()
+    with bento_card(6, "Computation defaults"):
+        st.selectbox("Coordinate system", ["Geocentric / Tropical (recommended)", "Heliocentric", "Geocentric / Right Ascension"], index=0)
+        st.number_input("Default orb (± degrees)", min_value=0.0, max_value=5.0, value=1.0, step=0.1)
+        st.multiselect(
+            "Default harmonic angles",
+            [0,30,45,60,72,90,120,135,144,150,180,225,240,270,315,330,360],
+            default=[0,60,90,120,180]
+        )
 
-    with a:
-        card = st.container()
-        with card:
-            st.subheader("Computation defaults")
-            st.selectbox("Coordinate system",
-                ["Geocentric / Tropical (recommended)", "Heliocentric", "Geocentric / Right Ascension"], index=0)
-            st.number_input("Default orb (± degrees)", min_value=0.0, max_value=5.0, value=1.0, step=0.1)
-            st.multiselect("Default harmonic angles",
-                [0,30,45,60,72,90,120,135,144,150,180,225,240,270,315,330,360],
-                default=[0,60,90,120,180])
+    with bento_card(6, "Time & locale"):
+        st.selectbox("Display timezone", ["UTC (recommended)"], index=0, help="All calculations are done in UTC; display can localize later.")
 
-    with b:
-        card = st.container()
-        with card:
-            st.subheader("Time & locale")
-            st.selectbox("Display timezone", ["UTC (recommended)"], index=0,
-                help="All calculations are done in UTC; display can localize later.")
+    with bento_card(12, "Data sources"):
+        st.markdown("- Ephemerides: **Skyfield** with JPL DE files")
+        st.markdown("- Price data (optional): discuss integrations (eg. Polygon.io, Alpha Vantage, Binance)")
+    bento_close()
 
-    # ---------- BENTO ROW: [Data sources] ----------
-    st.markdown('<div class="bento-row">', unsafe_allow_html=True)
-    c = st.columns([12], gap="small")[0]
-    with c:
-        card = st.container()
-        with card:
-            st.subheader("Data sources")
-            st.markdown("- Ephemerides: **Skyfield** with JPL DE files")
-            st.markdown("- Price data (optional): discuss integrations (Polygon.io, Alpha Vantage, Binance)")
-    st.markdown("</div>", unsafe_allow_html=True)
-
+# 5) About (Bento)
 elif page == "About":
     st.title("About Luminara")
+    bento_open()
+    with bento_card(12, "What is Luminara?"):
+        st.markdown(
+            """
+            **Luminara** helps traders analyze planetary cycles and harmonic angles
+            to anticipate timing clusters. Built with Streamlit and (soon) Skyfield ephemerides.
 
-    # ---------- Single card ----------
-    st.markdown('<div class="bento-row">', unsafe_allow_html=True)
-    full = st.columns([12], gap="small")[0]
-    with full:
-        card = st.container()
-        with card:
-            st.subheader("What is Luminara?")
-            st.markdown(
-                """
-                **Luminara** helps traders analyze planetary cycles and harmonic angles
-                to anticipate timing clusters. Built with Streamlit and Skyfield.
-
-                **Roadmap**:
-                1. Skyfield engine for geocentric tropical angles (UTC).
-                2. Scanners for multi-angle hits + clustering and scoring.
-                3. Backlog persistence + dashboard analytics.
-                4. Optional price-data overlays & alerts.
-                """
-            )
-    st.markdown("</div>", unsafe_allow_html=True)
+            **Roadmap**
+            1. Skyfield engine for geocentric tropical angles (UTC).
+            2. Scanners for multi-angle hits + clustering and scoring.
+            3. Backlog persistence + dashboard analytics.
+            4. Optional price-data overlays & alerts.
+            """
+        )
+    bento_close()
