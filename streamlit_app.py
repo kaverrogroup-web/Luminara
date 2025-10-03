@@ -336,11 +336,11 @@ def main():
         
         # Harmonic angles
         st.markdown("**Harmonic Angles**")
-        angle_options = [0, 30, 45, 60, 90, 120, 135, 150, 180]
+        angle_options = [0, 45, 60, 90, 120, 135, 180, 270, 360]
         selected_angles = st.multiselect(
             'Select angles (degrees)',
-            angle_options,
-            default=[0, 60, 90, 120, 180]
+            options=angle_options,
+            default=[0, 45, 60, 90, 120, 135, 180, 270, 360]
         )
         
         st.markdown("---")
