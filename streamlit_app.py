@@ -11,7 +11,6 @@ import numpy as np
 
 st.set_page_config(
     page_title="Luminara - Planetary Harmonics",
-    page_icon="🌟",
     layout="wide"
 )
 
@@ -161,15 +160,22 @@ def refine_hit_time(ts, eph, observer, p1_obj, p2_obj, coarse_time, target_angle
     """
     # Define search window around coarse hit
     window_minutes = step_minutes
-    t_start = ts.utc(coarse_time.utc_datetime() - timedelta(minutes=window_minutes/2))
-    t_end = ts.utc(coarse_time.utc_datetime() + timedelta(minutes=window_minutes/2))
+    dt_start = coarse_time.utc_datetime() - timedelta(minutes=window_minutes/2)
+    dt_end = coarse_time.utc_datetime() + timedelta(minutes=window_minutes/2)
+    
+    t_start = ts.utc(dt_start.year, dt_start.month, dt_start.day, 
+                     dt_start.hour, dt_start.minute, dt_start.second)
+    t_end = ts.utc(dt_end.year, dt_end.month, dt_end.day, 
+                   dt_end.hour, dt_end.minute, dt_end.second)
     
     # Bisection loop - narrow down to 1-second precision
     max_iterations = 20
     tolerance_seconds = 1.0
     
     for iteration in range(max_iterations):
-        t_mid = ts.utc(t_start.utc_datetime() + (t_end.utc_datetime() - t_start.utc_datetime()) / 2)
+        dt_mid = t_start.utc_datetime() + (t_end.utc_datetime() - t_start.utc_datetime()) / 2
+        t_mid = ts.utc(dt_mid.year, dt_mid.month, dt_mid.day, 
+                       dt_mid.hour, dt_mid.minute, int(dt_mid.second))
         
         # Calculate separations at boundaries and midpoint
         lon1_start = tropical_longitude(p1_obj, t_start, observer)
@@ -245,7 +251,9 @@ def scan_harmonic_timing(ts, eph, planet1, planet2, harmonic_angles, orb,
     minutes_processed = 0
     
     while current_dt <= end_dt:
-        t = ts.utc(current_dt)
+        # Convert datetime to Skyfield time using component args
+        t = ts.utc(current_dt.year, current_dt.month, current_dt.day, 
+                   current_dt.hour, current_dt.minute, current_dt.second)
         
         # Calculate current planetary longitudes
         lon1 = tropical_longitude(p1_obj, t, observer)
@@ -296,7 +304,7 @@ def scan_harmonic_timing(ts, eph, planet1, planet2, harmonic_angles, orb,
 
 def main():
     # Header
-    st.markdown('<div class="main-header">🌟 Luminara</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Luminara</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">Planetary Harmonics & Financial Timing Dashboard</div>', unsafe_allow_html=True)
     
     # Load ephemeris
@@ -312,7 +320,7 @@ def main():
     # ========================================================================
     
     with st.sidebar:
-        st.markdown("### ⚙️ Configuration")
+        st.markdown("### Configuration")
         
         # Planet selection
         planets = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 
@@ -359,7 +367,7 @@ def main():
         st.markdown("---")
         
         # Run button
-        run_scan = st.button('🔍 Run Harmonic Scan', type='primary', use_container_width=True)
+        run_scan = st.button('Run Harmonic Scan', type='primary', use_container_width=True)
     
     # ========================================================================
     # MAIN AREA - Results
