@@ -187,143 +187,79 @@ def section_header(title: str, subtitle: str | None = None) -> None:
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-# -------------- Sidebar (dark menu list + icons + collapse) --------------
-from streamlit_option_menu import option_menu
+# -------------- Sidebar --------------
+# Light sidebar + simple menu (radio skinned as flat rows)
 
-# Keep collapsed state in session (default expanded)
-if "nav_collapsed" not in st.session_state:
-    st.session_state["nav_collapsed"] = False
+PAGES = ["Dashboard", "Planet Pairs", "Backlog", "Settings", "About"]
 
-# Dark styles for the sidebar + selected pill look
-st.markdown("""
-<style>
-/* Dark shell */
-section[data-testid="stSidebar"] {
-  background: #0f1115 !important;
-  color: #e6e6e6 !important;
-  border-right: 1px solid #1b1f2a !important;
-}
-/* Reduce default padding */
-section[data-testid="stSidebar"] .block-container {
-  padding-top: 0.75rem !important;
-}
-/* Headings */
-section[data-testid="stSidebar"] h1, 
-section[data-testid="stSidebar"] h2, 
-section[data-testid="stSidebar"] h3, 
-section[data-testid="stSidebar"] h4,
-section[data-testid="stSidebar"] .stCaption {
-  color: #cfd3dc !important;
-}
-/* Option-menu base */
-ul.nav.nav-pills {
-  padding: 0.2rem 0.25rem !important;
-}
-/* Unselected item */
-.nav-pills .nav-link {
-  color: #e6e6e6 !important;
-  margin: 4px 6px !important;
-  padding: 10px 12px !important;
-  border-radius: 12px !important;
-  background: transparent !important;
-}
-/* Selected item pill */
-.nav-pills .nav-link.active {
-  background: #17202a !important;
-  color: #7BAE7F !important;   /* forest green accent */
-  box-shadow: inset 0 0 0 1px #223043;
-}
-/* Icons */
-.nav-pills .nav-link .bi {
-  font-size: 18px;
-  margin-right: 8px;
-  color: #7BAE7F;
-}
-/* Divider label (MENU, OTHER) */
-.sidebar-label {
-  font-size: 0.72rem;
-  letter-spacing: 0.12rem;
-  color: #8c94a6;
-  margin: 10px 10px 2px 12px;
-  text-transform: uppercase;
-}
-</style>
-""", unsafe_allow_html=True)
+if "page" not in st.session_state:
+    st.session_state.page = "Dashboard"
 
-# Collapse: hide the entire sidebar when collapsed
-if st.session_state["nav_collapsed"]:
-    st.markdown("""
+# Custom CSS: light sidebar, no collapse toggle, flat menu look
+st.sidebar.markdown(
+    """
     <style>
-    [data-testid="stSidebar"] {
-        width: 0 !important;
-        min-width: 0 !important;
-        max-width: 0 !important;
-        overflow: hidden !important;
+    section[data-testid="stSidebar"] {
+        background: #f7f8fa;                 /* light background */
+        border-right: 1px solid #e6e6e6;
     }
-    .main .block-container { padding-left: 1rem !important; }
+    /* Sidebar titles */
+    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
+    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3 {
+        color: #1c1c1c;
+    }
+    /* Radio group container */
+    section[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] {
+        gap: 6px;
+    }
+    /* Each radio item as a flat row */
+    section[data-testid="stSidebar"] .stRadio label {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        display: flex; align-items: center;
+        color: #1c1c1c;
+        background: transparent;
+        transition: background .15s, border-color .15s;
+        cursor: pointer;
+    }
+    /* Hide default radio dots */
+    section[data-testid="stSidebar"] .stRadio label div:first-child {
+        display: none !important;
+    }
+    /* Hover state */
+    section[data-testid="stSidebar"] .stRadio label:hover {
+        background: #f0f2f5;
+        border-color: #e6e6e6;
+    }
+    /* Active (selected) row */
+    section[data-testid="stSidebar"] .stRadio label[aria-checked="true"] {
+        background: #eef5f0;                 
+        border-color: #cfe4d3;
+        color: #2b5d2f;                       
+        font-weight: 600;
+    }
+    /* Remove "Menu" label text above */
+    section[data-testid="stSidebar"] .stRadio > label {
+        display: none !important;
+    }
     </style>
-    """, unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-with st.sidebar:
-    # Top row: logo + title + collapse button
-    c1, c2, c3 = st.columns([1, 3, 1])
-    with c1:
-        # TODO: change to your own logo URL
-        st.image(
-            "https://raw.githubusercontent.com/github/explore/main/topics/astronomy/astronomy.png",
-            use_column_width=True,
-        )
-    with c2:
-        st.markdown("### Luminara")
-        st.caption("Astro-financial analytics")
-    with c3:
-        if st.button("☰", help="Collapse / expand"):
-            st.session_state["nav_collapsed"] = not st.session_state["nav_collapsed"]
+# App title in sidebar
+st.sidebar.markdown("## Luminara")
+st.sidebar.caption("Astro-financial analytics")
 
-    chosen = "Dashboard"  # default
+# The radio is the menu
+menu_choice = st.sidebar.radio("", PAGES, index=PAGES.index(st.session_state.page))
+st.session_state.page = menu_choice
 
-    if not st.session_state["nav_collapsed"]:
-        # --- First group: MENU ---
-        st.markdown('<div class="sidebar-label">MENU</div>', unsafe_allow_html=True)
-        chosen = option_menu(
-            menu_title="",
-            options=["Dashboard", "Planet Pairs", "Backlog"],
-            icons=["speedometer", "moon", "journal-check"],
-            default_index=0,
-            orientation="vertical",
-            styles={
-                "container": {"background-color": "#0f1115", "padding": "0"},
-                "icon": {"color": "#7BAE7F"},
-                "nav-link": {"font-size": "15px"},
-                "nav-link-selected": {"background-color": "#17202a"},
-            },
-        )
-
-        # --- Second group: OTHER ---
-        st.markdown('<div class="sidebar-label">OTHER</div>', unsafe_allow_html=True)
-        other = option_menu(
-            menu_title="",
-            options=["Settings", "About"],
-            icons=["gear", "info-circle"],
-            default_index=1 if chosen not in ["Dashboard", "Planet Pairs", "Backlog"] else 0,
-            orientation="vertical",
-            styles={
-                "container": {"background-color": "#0f1115", "padding": "0"},
-                "icon": {"color": "#7BAE7F"},
-                "nav-link": {"font-size": "15px"},
-                "nav-link-selected": {"background-color": "#17202a"},
-            },
-        )
-
-        # If user clicked an item in OTHER, use that as page
-        if other in ["Settings", "About"]:
-            chosen = other
-
-        st.divider()
-        st.caption(f"UTC: {utc_now_iso()}")
-
-# The selected page to route on
-page = chosen
+# Clock
+st.sidebar.divider()
+st.sidebar.markdown(f"**UTC:** {utc_now_iso()}")
 
 # -------------- Pages --------------
 if page == "Dashboard":
