@@ -416,27 +416,29 @@ def main():
             # Fingerprint mode - anchor datetime
             st.markdown("**Anchor DateTime (UTC)**")
             anchor_date = st.date_input(
-                'Anchor Date',
-                datetime.now().date(),
-                help="Date to capture the planetary fingerprint"
+                'Anchor Date (UTC)',
+                datetime.now(timezone.utc).date(),
+                help="Date to capture the planetary fingerprint. All times are in UTC."
             )
             
             col1, col2 = st.columns(2)
             with col1:
                 anchor_hour = st.number_input(
-                    'Hour (0-23)',
+                    'Hour (UTC, 0-23)',
                     min_value=0,
                     max_value=23,
                     value=12,
-                    step=1
+                    step=1,
+                    help="All times are in UTC"
                 )
             with col2:
                 anchor_minute = st.number_input(
-                    'Minute (0-59)',
+                    'Minute (UTC, 0-59)',
                     min_value=0,
                     max_value=59,
                     value=0,
-                    step=1
+                    step=1,
+                    help="All times are in UTC"
                 )
         
         st.markdown("---")
@@ -455,8 +457,8 @@ def main():
         )
         end_date = st.date_input(
             'End Date (UTC)', 
-            (datetime.now(timezone.utc) + timedelta(days=90)).date(),
-            help="All times are in UTC"
+            (datetime.now(timezone.utc) + timedelta(days=30)).date(),
+            help="All times are in UTC. Use shorter ranges (30 days) for faster scans."
         )
         
         st.markdown("---")
@@ -467,14 +469,22 @@ def main():
             'Coarse Step (minutes)', 
             min_value=5, 
             max_value=240, 
-            value=15,
-            help="Initial bracket size. Smaller = tighter brackets, faster refinement."
+            value=30,
+            help="Initial bracket size. Smaller = tighter brackets, slower scan. Use 30-60 for long date ranges."
         )
         
         st.markdown("---")
         
         # Run button
         run_scan = st.button('Run Harmonic Scan', type='primary', use_container_width=True)
+        
+        # Performance guidance
+        st.markdown("---")
+        st.markdown("**⚡ Performance Tips**")
+        st.caption("• 30-day scan: ~30-60 seconds")
+        st.caption("• 90-day scan: ~2-5 minutes")
+        st.caption("• Use 30-60 min steps for long ranges")
+        st.caption("• Reduce # of angles for speed")
     
     # ========================================================================
     # MAIN AREA - Results
@@ -533,7 +543,7 @@ def main():
             st.download_button(
                 label="Download Results (CSV)",
                 data=csv,
-                file_name=f"luminara_{file_prefix}_{planet1}_{planet2}_{datetime.now().strftime('%Y%m%d')}.csv",
+                file_name=f"luminara_{file_prefix}_{planet1}_{planet2}_{datetime.now(timezone.utc).strftime('%Y%m%d')}_utc.csv",
                 mime="text/csv"
             )
         else:
