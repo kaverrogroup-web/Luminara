@@ -276,6 +276,8 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
     
     # Coarse scan loop
     current_dt = start_date
+    brackets_processed = 0
+    update_frequency = max(1, int(total_minutes / step_minutes / 100))  # Update every 1% of brackets
     
     while current_dt <= end_date:
         next_dt = min(current_dt + timedelta(minutes=step_minutes), end_date)
@@ -325,12 +327,14 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
                     # Skip this bracket if refinement fails
                     continue
         
-        # Progress update (update every 10th iteration to reduce overhead)
+        # Progress update - reduced frequency
+        brackets_processed += 1
         minutes_processed += step_minutes
-        if minutes_processed % (step_minutes * 10) < step_minutes or current_dt >= end_date:
+        
+        if brackets_processed % update_frequency == 0 or current_dt >= end_date:
             progress = min(minutes_processed / total_minutes, 1.0)
             progress_bar.progress(progress)
-            status_text.text(f"Scanning: {current_dt.strftime('%Y-%m-%d %H:%M')} ({int(progress*100)}%)")
+            status_text.text(f"Scanning: {current_dt.strftime('%Y-%m-%d %H:%M')} ({int(progress*100)}%) | Found: {len(results)} events")
         
         # Advance to next bracket
         current_dt = next_dt
@@ -459,8 +463,8 @@ def main():
         )
         end_date = st.date_input(
             'End Date (UTC)', 
-            (datetime.now(timezone.utc) + timedelta(days=30)).date(),
-            help="All times are in UTC. Use shorter ranges (30 days) for faster scans."
+            (datetime.now(timezone.utc) + timedelta(days=14)).date(),
+            help="All times are in UTC. Start with 7-14 days for testing."
         )
         
         st.markdown("---")
@@ -469,10 +473,10 @@ def main():
         st.markdown("**Scan Settings**")
         step_minutes = st.number_input(
             'Coarse Step (minutes)', 
-            min_value=5, 
+            min_value=30, 
             max_value=240, 
-            value=30,
-            help="Initial bracket size. Smaller = tighter brackets, slower scan. Use 30-60 for long date ranges."
+            value=60,
+            help="Larger steps = faster scan. Use 60-120 min to avoid timeouts."
         )
         
         st.markdown("---")
@@ -483,10 +487,12 @@ def main():
         # Performance guidance
         st.markdown("---")
         st.markdown("**⚡ Performance Tips**")
-        st.caption("• 30-day scan: ~30-60 seconds")
-        st.caption("• 90-day scan: ~2-5 minutes")
-        st.caption("• Use 30-60 min steps for long ranges")
-        st.caption("• Reduce # of angles for speed")
+        st.caption("• 7-day scan: ~10-20 seconds")
+        st.caption("• 14-day scan: ~20-40 seconds")
+        st.caption("• 30-day scan: ~60-90 seconds")
+        st.caption("• Use 60+ min steps")
+        st.caption("• Use 2-3 angles for speed")
+        st.caption("• Avoid scans > 30 days on Streamlit Cloud")
     
     # ========================================================================
     # MAIN AREA - Results
