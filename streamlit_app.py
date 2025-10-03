@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-from skyfield.api import load, wgs84
-from skyfield.almanac import find_discrete
+from skyfield.api import load
 import numpy as np
 
 # ============================================================================
@@ -53,31 +52,31 @@ st.markdown("""
 # ============================================================================
 
 @st.cache_resource
-def load_ephemeris():
-    """Load JPL DE421 ephemeris file (cached for performance)."""
+def get_ephemeris():
+    """Load JPL DE421 ephemeris file and timescale (cached for performance)."""
     ts = load.timescale()
     eph = load('de421.bsp')
-    return ts, eph
+    return eph, ts
 
-def get_planet_obj(eph, planet_name):
+def planet_obj(eph, planet_name):
     """
     Get planet object from ephemeris, handling barycenter fallback.
     DE421 contains barycenters; extract planet when available.
     """
     planet_map = {
-        'Sun': 10,
-        'Moon': 301,
-        'Mercury': 1,
-        'Venus': 2,
-        'Mars': 4,
-        'Jupiter': 5,
-        'Saturn': 6,
-        'Uranus': 7,
-        'Neptune': 8,
-        'Pluto': 9
+        'sun': 10,
+        'moon': 301,
+        'mercury': 1,
+        'venus': 2,
+        'mars': 4,
+        'jupiter': 5,
+        'saturn': 6,
+        'uranus': 7,
+        'neptune': 8,
+        'pluto': 9
     }
     
-    code = planet_map.get(planet_name)
+    code = planet_map.get(planet_name.lower())
     if code is None:
         raise ValueError(f"Unknown planet: {planet_name}")
     
@@ -88,201 +87,185 @@ def get_planet_obj(eph, planet_name):
         return obj.planet
     return obj
 
-def tropical_longitude(planet_obj, time, observer):
+# ============================================================================
+# ECLIPTIC LONGITUDE & ANGLE HELPERS
+# ============================================================================
+
+def ecliptic_longitude_deg(eph, ts, planet_name, t):
     """
-    Calculate geocentric tropical longitude of a planet.
+    Calculate geocentric ecliptic longitude (tropical) of a planet at time t.
     Returns longitude in degrees [0, 360).
     """
-    astrometric = observer.at(time).observe(planet_obj)
-    ra, dec, distance = astrometric.radec()
+    earth = eph['earth']
+    planet = planet_obj(eph, planet_name)
     
-    # Convert RA (hours) to ecliptic longitude (degrees)
-    # Approximate tropical longitude (simplified)
-    lon = ra.hours * 15.0  # Convert hours to degrees
+    # Get apparent position from Earth
+    astrometric = earth.at(t).observe(planet)
     
-    # For more accurate ecliptic conversion, use proper transformation
-    # This is a simplified version - for production, use proper ecliptic coordinates
-    return lon % 360.0
+    # Get ecliptic coordinates
+    lat, lon, distance = astrometric.ecliptic_latlon()
+    
+    # Return longitude in degrees
+    return lon.degrees % 360.0
 
-def angular_separation(lon1, lon2):
+def angle_between_ecliptic_longitudes_deg(eph, ts, planet1, planet2, t):
     """
-    Calculate smallest angular separation between two longitudes.
-    Returns value in range [0, 180].
+    Geocentric ecliptic longitude separation in [0, 360).
+    Returns the raw angular separation (not wrapped to [0, 180]).
     """
-    diff = abs(lon1 - lon2)
-    if diff > 180:
-        diff = 360 - diff
-    return diff
+    lon1 = ecliptic_longitude_deg(eph, ts, planet1, t)
+    lon2 = ecliptic_longitude_deg(eph, ts, planet2, t)
+    
+    sep = (lon1 - lon2) % 360.0
+    return sep
 
-def is_harmonic_hit(separation, target_angle, orb):
+def angle_diff_to_target_deg(eph, ts, planet1, planet2, t, target):
     """
-    Check if angular separation is within orb of target harmonic angle.
-    Handles both direct angle and its supplement (180° complement).
+    Absolute minimal separation to target angle in [0, 180].
+    This is the objective function we want to minimize.
     """
-    # Check direct angle
-    delta1 = abs(separation - target_angle)
+    separation = angle_between_ecliptic_longitudes_deg(eph, ts, planet1, planet2, t)
     
-    # Check supplement (e.g., 60° also matches 300°)
-    supplement = 360 - target_angle if target_angle != 180 else 180
-    delta2 = abs(separation - supplement)
+    # Calculate distance to target, considering both directions
+    diff1 = abs(separation - target)
+    diff2 = abs(separation - (target + 360.0)) if target < 180 else abs(separation - (target - 360.0))
     
-    return min(delta1, delta2) <= orb
-
-def get_orb_delta(separation, target_angle):
-    """
-    Calculate the orb delta (how far from exact harmonic).
-    Returns signed delta in degrees.
-    """
-    delta1 = separation - target_angle
-    delta2 = separation - (360 - target_angle)
+    # Also consider the wrap-around
+    diff3 = 360.0 - diff1
     
-    # Return the smaller absolute delta with its sign
-    if abs(delta1) < abs(delta2):
-        return delta1
-    return delta2
+    return min(diff1, diff2, diff3)
 
 # ============================================================================
-# HARMONIC TIMING ALGORITHM
+# REFINEMENT ALGORITHM (GOLDEN SECTION SEARCH)
 # ============================================================================
 
-def refine_hit_time(ts, eph, observer, p1_obj, p2_obj, coarse_time, target_angle, orb, step_minutes=60):
+def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
+                           max_iter=30, tol_seconds=1.0):
     """
-    Bisection refinement to find exact harmonic hit time.
-    Starting from coarse hit, narrows down to second-level precision.
+    Golden-section search in [t_lo, t_hi] that returns (t_best, diff_best_deg).
+    
+    Minimizes: angle_diff_to_target_deg(planet1, planet2, t, target)
+    
+    Works in POSIX seconds for smooth stepping, converts back to Skyfield time.
     
     Parameters:
-    - coarse_time: Skyfield Time object (approximate hit)
-    - step_minutes: initial step size for bisection window
+    - t_lo, t_hi: Skyfield Time objects defining search bracket
+    - target: target harmonic angle in degrees
+    - max_iter: maximum iterations
+    - tol_seconds: stop when interval < this many seconds
     
     Returns:
-    - refined Skyfield Time object (exact hit to the second)
-    - actual separation at that time
+    - t_best: Skyfield Time object at minimum
+    - diff_best: angular difference at minimum (degrees)
     """
-    # Define search window around coarse hit
-    window_minutes = step_minutes
-    dt_start = coarse_time.utc_datetime() - timedelta(minutes=window_minutes/2)
-    dt_end = coarse_time.utc_datetime() + timedelta(minutes=window_minutes/2)
+    # Golden ratio
+    phi = (1.0 + np.sqrt(5.0)) / 2.0
+    resphi = 2.0 - phi
     
-    t_start = ts.utc(dt_start.year, dt_start.month, dt_start.day, 
-                     dt_start.hour, dt_start.minute, dt_start.second)
-    t_end = ts.utc(dt_end.year, dt_end.month, dt_end.day, 
-                   dt_end.hour, dt_end.minute, dt_end.second)
+    # Convert to POSIX timestamps for easy arithmetic
+    a = t_lo.utc_datetime().timestamp()
+    b = t_hi.utc_datetime().timestamp()
     
-    # Bisection loop - narrow down to 1-second precision
-    max_iterations = 20
-    tolerance_seconds = 1.0
+    # Initial probe points
+    x1 = a + resphi * (b - a)
+    x2 = b - resphi * (b - a)
     
-    for iteration in range(max_iterations):
-        dt_mid = t_start.utc_datetime() + (t_end.utc_datetime() - t_start.utc_datetime()) / 2
-        t_mid = ts.utc(dt_mid.year, dt_mid.month, dt_mid.day, 
-                       dt_mid.hour, dt_mid.minute, int(dt_mid.second))
+    # Convert back to Skyfield times
+    t1 = ts.from_datetime(datetime.utcfromtimestamp(x1))
+    t2 = ts.from_datetime(datetime.utcfromtimestamp(x2))
+    
+    # Evaluate objective function
+    f1 = angle_diff_to_target_deg(eph, ts, planet1, planet2, t1, target)
+    f2 = angle_diff_to_target_deg(eph, ts, planet1, planet2, t2, target)
+    
+    for _ in range(max_iter):
+        if (b - a) < tol_seconds:
+            break
         
-        # Calculate separations at boundaries and midpoint
-        lon1_start = tropical_longitude(p1_obj, t_start, observer)
-        lon2_start = tropical_longitude(p2_obj, t_start, observer)
-        sep_start = angular_separation(lon1_start, lon2_start)
-        delta_start = abs(get_orb_delta(sep_start, target_angle))
-        
-        lon1_mid = tropical_longitude(p1_obj, t_mid, observer)
-        lon2_mid = tropical_longitude(p2_obj, t_mid, observer)
-        sep_mid = angular_separation(lon1_mid, lon2_mid)
-        delta_mid = abs(get_orb_delta(sep_mid, target_angle))
-        
-        lon1_end = tropical_longitude(p1_obj, t_end, observer)
-        lon2_end = tropical_longitude(p2_obj, t_end, observer)
-        sep_end = angular_separation(lon1_end, lon2_end)
-        delta_end = abs(get_orb_delta(sep_end, target_angle))
-        
-        # Find which half contains the minimum delta
-        if delta_start <= delta_mid and delta_start <= delta_end:
-            best_time = t_start
-            best_sep = sep_start
-        elif delta_end <= delta_mid:
-            best_time = t_end
-            best_sep = sep_end
+        if f1 < f2:
+            b = x2
+            x2 = x1
+            f2 = f1
+            x1 = a + resphi * (b - a)
+            t1 = ts.from_datetime(datetime.utcfromtimestamp(x1))
+            f1 = angle_diff_to_target_deg(eph, ts, planet1, planet2, t1, target)
         else:
-            best_time = t_mid
-            best_sep = sep_mid
-        
-        # Check convergence
-        time_span_seconds = (t_end.utc_datetime() - t_start.utc_datetime()).total_seconds()
-        if time_span_seconds <= tolerance_seconds:
-            return best_time, best_sep
-        
-        # Narrow the search window
-        if delta_start <= delta_end:
-            t_end = t_mid
-        else:
-            t_start = t_mid
+            a = x1
+            x1 = x2
+            f1 = f2
+            x2 = b - resphi * (b - a)
+            t2 = ts.from_datetime(datetime.utcfromtimestamp(x2))
+            f2 = angle_diff_to_target_deg(eph, ts, planet1, planet2, t2, target)
     
-    # Return best result found
-    return best_time, best_sep
+    # Return best point
+    if f1 < f2:
+        return t1, f1
+    else:
+        return t2, f2
 
-def scan_harmonic_timing(ts, eph, planet1, planet2, harmonic_angles, orb, 
-                         start_date, end_date, step_minutes=60):
+# ============================================================================
+# HARMONIC TIMING SCANNER (BRACKET & REFINE)
+# ============================================================================
+
+def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb,
+                                 start_date, end_date, step_minutes=60):
     """
     Scan date range for harmonic angle hits between two planets.
     
     Process:
-    1. Coarse scan with step_minutes interval
-    2. Detect approximate hits (within orb)
-    3. Refine each hit using bisection to second-level precision
+    1. Coarse scan with step_minutes interval to bracket potential hits
+    2. For each bracket where a hit is detected, refine using golden-section search
+    3. Only record hits where refined angle is within orb
+    4. Deduplicate hits within 30 seconds
     
     Returns:
-    - DataFrame with columns: DateTime (UTC), Planet1, Planet2, Harmonic, Actual°, Delta°
+    - DataFrame with columns: DateTime (UTC), Planet 1, Planet 2, Target (°), Δ (deg)
     """
-    observer = eph['earth']
-    p1_obj = get_planet_obj(eph, planet1)
-    p2_obj = get_planet_obj(eph, planet2)
-    
     results = []
     
-    # Convert dates to Skyfield times
-    current_dt = start_date
-    end_dt = end_date
-    
-    # Track previous state for edge detection
-    prev_in_orb = {angle: False for angle in harmonic_angles}
-    
+    # Progress tracking
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    total_minutes = (end_dt - current_dt).total_seconds() / 60
+    total_minutes = (end_date - start_date).total_seconds() / 60
     minutes_processed = 0
     
-    while current_dt <= end_dt:
-        # Convert datetime to Skyfield time using component args
-        t = ts.utc(current_dt.year, current_dt.month, current_dt.day, 
-                   current_dt.hour, current_dt.minute, current_dt.second)
+    # Coarse scan loop
+    current_dt = start_date
+    
+    while current_dt <= end_date:
+        next_dt = min(current_dt + timedelta(minutes=step_minutes), end_date)
         
-        # Calculate current planetary longitudes
-        lon1 = tropical_longitude(p1_obj, t, observer)
-        lon2 = tropical_longitude(p2_obj, t, observer)
-        separation = angular_separation(lon1, lon2)
+        # Create Skyfield time objects for bracket
+        t_lo = ts.from_datetime(current_dt.replace(tzinfo=None))
+        t_hi = ts.from_datetime(next_dt.replace(tzinfo=None))
         
-        # Check each harmonic angle
+        # Check midpoint for proximity to any target angle
+        t_mid = ts.from_datetime((current_dt + (next_dt - current_dt) / 2).replace(tzinfo=None))
+        
         for target_angle in harmonic_angles:
-            currently_in_orb = is_harmonic_hit(separation, target_angle, orb)
+            # Quick check: is midpoint within reasonable proximity?
+            mid_diff = angle_diff_to_target_deg(eph, ts, planet1, planet2, t_mid, target_angle)
             
-            # Detect rising edge (entering orb) - trigger refinement
-            if currently_in_orb and not prev_in_orb[target_angle]:
-                # Found approximate hit - now refine
-                refined_time, refined_sep = refine_hit_time(
-                    ts, eph, observer, p1_obj, p2_obj, t, target_angle, orb, step_minutes
+            # Use a wider threshold for bracketing (2x orb + some margin)
+            bracket_threshold = orb * 2.5
+            
+            if mid_diff < bracket_threshold:
+                # Refine this bracket
+                t_best, diff_best = refine_hit_time_golden(
+                    eph, ts, planet1, planet2, t_lo, t_hi, target_angle
                 )
                 
-                orb_delta = get_orb_delta(refined_sep, target_angle)
-                
-                results.append({
-                    'DateTime (UTC)': refined_time.utc_datetime().strftime('%Y-%m-%d %H:%M:%S'),
-                    'Planet 1': planet1,
-                    'Planet 2': planet2,
-                    'Harmonic': f"{target_angle}°",
-                    'Actual°': f"{refined_sep:.4f}",
-                    'Delta°': f"{orb_delta:+.4f}"
-                })
-            
-            prev_in_orb[target_angle] = currently_in_orb
+                # Only record if within actual orb
+                if diff_best <= orb:
+                    results.append({
+                        'timestamp': t_best.utc_datetime(),
+                        'datetime_str': t_best.utc_strftime('%Y-%m-%d %H:%M:%S'),
+                        'planet1': planet1,
+                        'planet2': planet2,
+                        'target': target_angle,
+                        'delta': diff_best
+                    })
         
         # Progress update
         minutes_processed += step_minutes
@@ -290,13 +273,33 @@ def scan_harmonic_timing(ts, eph, planet1, planet2, harmonic_angles, orb,
         progress_bar.progress(progress)
         status_text.text(f"Scanning: {current_dt.strftime('%Y-%m-%d %H:%M')} ({int(progress*100)}%)")
         
-        # Advance time
-        current_dt += timedelta(minutes=step_minutes)
+        # Advance to next bracket
+        current_dt = next_dt
     
     progress_bar.empty()
     status_text.empty()
     
-    return pd.DataFrame(results)
+    # Deduplicate: remove hits within 30 seconds of each other
+    if results:
+        results_sorted = sorted(results, key=lambda x: x['timestamp'])
+        deduped = [results_sorted[0]]
+        
+        for r in results_sorted[1:]:
+            prev_time = deduped[-1]['timestamp']
+            curr_time = r['timestamp']
+            
+            if (curr_time - prev_time).total_seconds() > 30:
+                deduped.append(r)
+        
+        # Build DataFrame
+        df = pd.DataFrame(deduped)
+        df = df[['datetime_str', 'planet1', 'planet2', 'target', 'delta']]
+        df.columns = ['DateTime (UTC)', 'Planet 1', 'Planet 2', 'Target (°)', 'Δ (deg)']
+        df['Δ (deg)'] = df['Δ (deg)'].apply(lambda x: f"{x:.4f}")
+        
+        return df
+    
+    return pd.DataFrame(columns=['DateTime (UTC)', 'Planet 1', 'Planet 2', 'Target (°)', 'Δ (deg)'])
 
 # ============================================================================
 # STREAMLIT UI
@@ -309,7 +312,7 @@ def main():
     
     # Load ephemeris
     try:
-        ts, eph = load_ephemeris()
+        eph, ts = get_ephemeris()
     except Exception as e:
         st.error(f"Failed to load ephemeris: {e}")
         st.info("Ensure de421.bsp is in the working directory or Skyfield cache.")
@@ -357,11 +360,11 @@ def main():
         # Scan settings
         st.markdown("**Scan Settings**")
         step_minutes = st.number_input(
-            'Step Size (minutes)', 
-            min_value=1, 
-            max_value=1440, 
+            'Coarse Step (minutes)', 
+            min_value=5, 
+            max_value=240, 
             value=60,
-            help="Coarse scan interval. Smaller = more precise but slower."
+            help="Initial bracket size. Smaller = tighter brackets, faster refinement."
         )
         
         st.markdown("---")
@@ -392,22 +395,22 @@ def main():
         
         # Run scan
         st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">📊 Harmonic Timing Results</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">Harmonic Timing Results</div>', unsafe_allow_html=True)
         
-        with st.spinner('Calculating planetary harmonics...'):
-            results_df = scan_harmonic_timing(
-                ts, eph, planet1, planet2, selected_angles, orb,
+        with st.spinner('Calculating planetary harmonics with precision refinement...'):
+            results_df = scan_harmonic_timing_refined(
+                eph, ts, planet1, planet2, selected_angles, orb,
                 start_dt, end_dt, step_minutes
             )
         
         if len(results_df) > 0:
-            st.success(f"Found {len(results_df)} harmonic event(s)")
+            st.success(f"Found {len(results_df)} harmonic event(s) (refined to second precision)")
             st.dataframe(results_df, use_container_width=True, hide_index=True)
             
             # Download button
             csv = results_df.to_csv(index=False)
             st.download_button(
-                label="📥 Download Results (CSV)",
+                label="Download Results (CSV)",
                 data=csv,
                 file_name=f"luminara_harmonics_{planet1}_{planet2}_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
@@ -420,15 +423,23 @@ def main():
     else:
         # Instructions when no scan is running
         st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">👋 Welcome to Luminara</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">Welcome to Luminara</div>', unsafe_allow_html=True)
         st.markdown("""
         Configure your harmonic scan in the sidebar and click **Run Harmonic Scan** to begin.
         
         **Features:**
         - High-precision planetary ephemeris (JPL DE421)
-        - Geocentric tropical longitudes (UTC)
-        - Coarse scan + bisection refinement (second-level accuracy)
+        - Geocentric ecliptic longitudes (tropical)
+        - Golden-section refinement for second-level accuracy
+        - Bracket-and-refine algorithm eliminates grid snapping
         - Multiple harmonic angles with custom orb tolerance
+        
+        **How It Works:**
+        1. Coarse scan divides time range into brackets (step size)
+        2. Each bracket is checked for proximity to target angles
+        3. Promising brackets are refined using golden-section search
+        4. Only hits within orb tolerance are recorded
+        5. Results show exact time with second precision
         
         **Coming Soon:**
         - Asset price anchoring
