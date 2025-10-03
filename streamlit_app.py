@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from skyfield.api import load
 import numpy as np
 
@@ -46,6 +46,35 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# ============================================================================
+# DATETIME UTILITIES
+# ============================================================================
+
+def make_utc_datetime(year, month, day, hour=0, minute=0, second=0):
+    """
+    Create a timezone-aware datetime in UTC.
+    
+    Parameters:
+    - year, month, day, hour, minute, second: datetime components
+    
+    Returns:
+    - datetime object with timezone=UTC
+    """
+    return datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
+
+def date_to_utc_datetime(date_obj, hour=0, minute=0, second=0):
+    """
+    Convert a date object to a UTC-aware datetime.
+    
+    Parameters:
+    - date_obj: datetime.date object (from st.date_input)
+    - hour, minute, second: time components
+    
+    Returns:
+    - datetime object with timezone=UTC
+    """
+    return make_utc_datetime(date_obj.year, date_obj.month, date_obj.day, hour, minute, second)
 
 # ============================================================================
 # EPHEMERIS & PLANETARY SETUP
@@ -163,6 +192,7 @@ def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
     resphi = 2.0 - phi
     
     # Convert to POSIX timestamps for easy arithmetic
+    # Skyfield .utc_datetime() returns timezone-aware datetime
     a = t_lo.utc_datetime().timestamp()
     b = t_hi.utc_datetime().timestamp()
     
@@ -170,9 +200,12 @@ def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
     x1 = a + resphi * (b - a)
     x2 = b - resphi * (b - a)
     
-    # Convert back to Skyfield times
-    t1 = ts.from_datetime(datetime.utcfromtimestamp(x1))
-    t2 = ts.from_datetime(datetime.utcfromtimestamp(x2))
+    # Convert back to Skyfield times (from UTC timestamp)
+    dt1 = datetime.fromtimestamp(x1, tz=timezone.utc)
+    dt2 = datetime.fromtimestamp(x2, tz=timezone.utc)
+    
+    t1 = ts.from_datetime(dt1)
+    t2 = ts.from_datetime(dt2)
     
     # Evaluate objective function
     f1 = angle_diff_to_target_deg(eph, ts, planet1, planet2, t1, target)
@@ -187,14 +220,16 @@ def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
             x2 = x1
             f2 = f1
             x1 = a + resphi * (b - a)
-            t1 = ts.from_datetime(datetime.utcfromtimestamp(x1))
+            dt1 = datetime.fromtimestamp(x1, tz=timezone.utc)
+            t1 = ts.from_datetime(dt1)
             f1 = angle_diff_to_target_deg(eph, ts, planet1, planet2, t1, target)
         else:
             a = x1
             x1 = x2
             f1 = f2
             x2 = b - resphi * (b - a)
-            t2 = ts.from_datetime(datetime.utcfromtimestamp(x2))
+            dt2 = datetime.fromtimestamp(x2, tz=timezone.utc)
+            t2 = ts.from_datetime(dt2)
             f2 = angle_diff_to_target_deg(eph, ts, planet1, planet2, t2, target)
     
     # Return best point
@@ -218,6 +253,9 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
     3. Only record hits where refined angle is within orb
     4. Deduplicate hits within 30 seconds
     
+    Parameters:
+    - start_date, end_date: timezone-aware datetime objects in UTC
+    
     Returns:
     - DataFrame with columns: DateTime (UTC), Planet 1, Planet 2, Target (°), Δ (deg)
     """
@@ -236,12 +274,13 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
     while current_dt <= end_date:
         next_dt = min(current_dt + timedelta(minutes=step_minutes), end_date)
         
-        # Create Skyfield time objects for bracket
-        t_lo = ts.from_datetime(current_dt.replace(tzinfo=None))
-        t_hi = ts.from_datetime(next_dt.replace(tzinfo=None))
+        # Create Skyfield time objects for bracket (already UTC-aware)
+        t_lo = ts.from_datetime(current_dt)
+        t_hi = ts.from_datetime(next_dt)
         
         # Check midpoint for proximity to any target angle
-        t_mid = ts.from_datetime((current_dt + (next_dt - current_dt) / 2).replace(tzinfo=None))
+        mid_dt = current_dt + (next_dt - current_dt) / 2
+        t_mid = ts.from_datetime(mid_dt)
         
         for target_angle in harmonic_angles:
             # Quick check: is midpoint within reasonable proximity?
