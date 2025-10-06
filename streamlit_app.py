@@ -442,10 +442,8 @@ def main():
         end_dt = date_to_utc_datetime(st.session_state.end_date, 23, 59, 59)
         
         # Run scan
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">Harmonic Timing Results</div>', unsafe_allow_html=True)
-        
         mode_label = "fingerprint recurrence" if st.session_state.mode == "Fingerprint" else "planetary harmonics"
+        
         with st.spinner(f'Calculating {mode_label} with precision refinement...'):
             results = scan_harmonic_timing_refined(
                 eph, ts, st.session_state.planet1, st.session_state.planet2,
@@ -475,29 +473,24 @@ def main():
         # Store in session state for CSV download
         st.session_state["harmonics_df"] = df
         
-        # Always render
+        # Display results section
+        st.subheader("Harmonic Timing Results")
+        
         event_type = "recurrence event(s)" if st.session_state.mode == "Fingerprint" else "harmonic event(s)"
         st.success(f"Found {len(df)} {event_type}")
         
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            height=min(400, 35 * max(1, len(df)) + 38) if not df.empty else 100
-        )
+        # Always display dataframe
+        st.dataframe(df, use_container_width=True, height=400)
         
         # CSV download button - always available
-        if "harmonics_df" in st.session_state and st.session_state.harmonics_df is not None:
-            csv = st.session_state.harmonics_df.to_csv(index=False)
-            file_prefix = "fingerprint" if st.session_state.mode == "Fingerprint" else "harmonics"
-            st.download_button(
-                label="Download Results (CSV)",
-                data=csv,
-                file_name=f"luminara_{file_prefix}_{st.session_state.planet1}_{st.session_state.planet2}_{datetime.now(timezone.utc).strftime('%Y%m%d')}_utc.csv",
-                mime="text/csv"
-            )
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+        csv = df.to_csv(index=False)
+        file_prefix = "fingerprint" if st.session_state.mode == "Fingerprint" else "harmonics"
+        st.download_button(
+            label="Download Results (CSV)",
+            data=csv,
+            file_name=f"luminara_{file_prefix}_{st.session_state.planet1}_{st.session_state.planet2}_{datetime.now(timezone.utc).strftime('%Y%m%d')}_utc.csv",
+            mime="text/csv"
+        )
     
     else:
         # Instructions when no scan is running
