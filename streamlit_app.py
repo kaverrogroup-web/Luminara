@@ -166,8 +166,13 @@ def refine_hit_time_golden(eph, ts, planet1, planet2, t_lo, t_hi, target,
 
 def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb,
                                  start_date, end_date, step_minutes=60):
-    """Scan date range for harmonic angle hits between two planets."""
-    results = []
+    """
+    Scan date range for harmonic angle hits between two planets.
+    
+    Returns:
+    - List of dicts with keys: "DateTime (UTC)", "Planet 1", "Planet 2", "Angle", "Δ (deg)"
+    """
+    events = []
     
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -204,15 +209,13 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
                     )
                     
                     if diff_best <= orb:
-                        result_entry = {
-                            'timestamp': t_best.utc_datetime(),
-                            'datetime_str': t_best.utc_strftime('%Y-%m-%d %H:%M:%S'),
-                            'planet1': planet1,
-                            'planet2': planet2,
-                            'target': float(target_angle),
-                            'delta': float(diff_best)
-                        }
-                        results.append(result_entry)
+                        events.append({
+                            "DateTime (UTC)": t_best.utc_datetime(),  # tz-aware UTC datetime
+                            "Planet 1": planet1,
+                            "Planet 2": planet2,
+                            "Angle": float(target_angle),
+                            "Δ (deg)": round(float(diff_best), 3)
+                        })
                 except Exception:
                     continue
         
@@ -222,38 +225,25 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
         if brackets_processed % update_frequency == 0 or current_dt >= end_date:
             progress = min(minutes_processed / total_minutes, 1.0)
             progress_bar.progress(progress)
-            status_text.text(f"Scanning: {current_dt.strftime('%Y-%m-%d %H:%M')} ({int(progress*100)}%) | Found: {len(results)} events")
+            status_text.text(f"Scanning: {current_dt.strftime('%Y-%m-%d %H:%M')} ({int(progress*100)}%) | Found: {len(events)} events")
         
         current_dt = next_dt
     
     progress_bar.empty()
     status_text.empty()
     
-    if results:
-        results_sorted = sorted(results, key=lambda x: x['timestamp'])
-        deduped = [results_sorted[0]]
+    # Deduplicate: remove events within 30 seconds of each other
+    if events:
+        events_sorted = sorted(events, key=lambda x: x["DateTime (UTC)"])
+        deduped = [events_sorted[0]]
         
-        for r in results_sorted[1:]:
-            if (r['timestamp'] - deduped[-1]['timestamp']).total_seconds() > 30:
-                deduped.append(r)
+        for evt in events_sorted[1:]:
+            if (evt["DateTime (UTC)"] - deduped[-1]["DateTime (UTC)"]).total_seconds() > 30:
+                deduped.append(evt)
         
-        # Build DataFrame with explicit column ordering
-        df = pd.DataFrame(deduped)
-        
-        # Reorder and rename columns
-        df = df[['datetime_str', 'planet1', 'planet2', 'target', 'delta']]
-        df.columns = ['DateTime (UTC)', 'Planet 1', 'Planet 2', 'Target (°)', 'Δ (deg)']
-        
-        # Format the delta column
-        df['Δ (deg)'] = df['Δ (deg)'].apply(lambda x: f"{x:.4f}")
-        
-        # Format target angle
-        df['Target (°)'] = df['Target (°)'].apply(lambda x: f"{x:.1f}" if isinstance(x, (int, float)) else str(x))
-        
-        return df
+        return deduped
     
-    # Return empty DataFrame with proper structure
-    return pd.DataFrame(columns=['DateTime (UTC)', 'Planet 1', 'Planet 2', 'Target (°)', 'Δ (deg)'])
+    return []
 
 # ============================================================================
 # SESSION STATE INITIALIZATION
@@ -272,6 +262,7 @@ def initialize_session_state():
     st.session_state.setdefault('start_date', datetime.now(timezone.utc).date())
     st.session_state.setdefault('end_date', (datetime.now(timezone.utc) + timedelta(days=14)).date())
     st.session_state.setdefault('step_minutes', 60)
+    st.session_state.setdefault('harmonics_df', pd.DataFrame(columns=["DateTime (UTC)", "Planet 1", "Planet 2", "Angle", "Δ (deg)"]))
 
 # ============================================================================
 # MAIN APPLICATION
@@ -456,26 +447,48 @@ def main():
         
         mode_label = "fingerprint recurrence" if st.session_state.mode == "Fingerprint" else "planetary harmonics"
         with st.spinner(f'Calculating {mode_label} with precision refinement...'):
-            results_df = scan_harmonic_timing_refined(
+            results = scan_harmonic_timing_refined(
                 eph, ts, st.session_state.planet1, st.session_state.planet2,
                 target_angles, st.session_state.orb, start_dt, end_dt, st.session_state.step_minutes
             )
         
-        # Always show results regardless of count
-        if results_df is not None and len(results_df) > 0:
-            event_type = "recurrence event(s)" if st.session_state.mode == "Fingerprint" else "harmonic event(s)"
-            st.success(f"Found {len(results_df)} {event_type} (refined to second precision)")
-            
-            # Force display with explicit configuration
-            st.dataframe(
-                results_df,
-                use_container_width=True,
-                hide_index=True,
-                height=min(400, 35 * len(results_df) + 38)  # Dynamic height
-            )
-            
-            # Download button
-            csv = results_df.to_csv(index=False)
+        # Defensive: normalize results to list[dict]
+        if results is None:
+            results = []
+        elif not isinstance(results, list):
+            results = list(results)
+        
+        # DEBUG - temporary visibility (remove after verification)
+        st.write("DEBUG | hits:", len(results))
+        if len(results) > 0:
+            st.write("DEBUG | first 3:", results[:3])
+        
+        # Build DataFrame with exact column specification
+        df = pd.DataFrame(results, columns=["DateTime (UTC)", "Planet 1", "Planet 2", "Angle", "Δ (deg)"])
+        
+        # Sort and format if not empty
+        if not df.empty:
+            # Ensure tz-aware UTC
+            df["DateTime (UTC)"] = pd.to_datetime(df["DateTime (UTC)"], utc=True)
+            df = df.sort_values("DateTime (UTC)").reset_index(drop=True)
+        
+        # Store in session state for CSV download
+        st.session_state["harmonics_df"] = df
+        
+        # Always render
+        event_type = "recurrence event(s)" if st.session_state.mode == "Fingerprint" else "harmonic event(s)"
+        st.success(f"Found {len(df)} {event_type}")
+        
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(400, 35 * max(1, len(df)) + 38) if not df.empty else 100
+        )
+        
+        # CSV download button - always available
+        if "harmonics_df" in st.session_state and st.session_state.harmonics_df is not None:
+            csv = st.session_state.harmonics_df.to_csv(index=False)
             file_prefix = "fingerprint" if st.session_state.mode == "Fingerprint" else "harmonics"
             st.download_button(
                 label="Download Results (CSV)",
@@ -483,13 +496,6 @@ def main():
                 file_name=f"luminara_{file_prefix}_{st.session_state.planet1}_{st.session_state.planet2}_{datetime.now(timezone.utc).strftime('%Y%m%d')}_utc.csv",
                 mime="text/csv"
             )
-        else:
-            event_type = "fingerprint recurrence events" if st.session_state.mode == "Fingerprint" else "harmonic events"
-            st.warning(f"No {event_type} found in the selected date range.")
-            
-            # Show empty dataframe with proper structure
-            empty_df = pd.DataFrame(columns=['DateTime (UTC)', 'Planet 1', 'Planet 2', 'Target (°)', 'Δ (deg)'])
-            st.dataframe(empty_df, use_container_width=True, hide_index=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
     
