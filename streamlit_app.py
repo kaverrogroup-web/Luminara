@@ -169,6 +169,10 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
     """
     Scan date range for harmonic angle hits between two planets.
     
+    Parameters:
+    - start_date, end_date: timezone-aware datetime objects in UTC
+    - harmonic_angles: list of target angles in degrees
+    
     Returns:
     - List of dicts with keys: "DateTime (UTC)", "Planet 1", "Planet 2", "Angle", "Δ (deg)"
     """
@@ -210,7 +214,7 @@ def scan_harmonic_timing_refined(eph, ts, planet1, planet2, harmonic_angles, orb
                     
                     if diff_best <= orb:
                         events.append({
-                            "DateTime (UTC)": t_best.utc_datetime(),  # tz-aware UTC datetime
+                            "DateTime (UTC)": t_best.utc_datetime(),
                             "Planet 1": planet1,
                             "Planet 2": planet2,
                             "Angle": float(target_angle),
@@ -262,7 +266,7 @@ def initialize_session_state():
     st.session_state.setdefault('start_date', datetime.now(timezone.utc).date())
     st.session_state.setdefault('end_date', (datetime.now(timezone.utc) + timedelta(days=14)).date())
     st.session_state.setdefault('step_minutes', 60)
-    st.session_state.setdefault('harmonics_df', pd.DataFrame(columns=["DateTime (UTC)", "Planet 1", "Planet 2", "Angle", "Δ (deg)"]))
+    st.session_state.setdefault('harmonics_df', None)
 
 # ============================================================================
 # MAIN APPLICATION
@@ -387,7 +391,7 @@ def main():
         
         # Performance guidance
         st.markdown("---")
-        st.markdown("**⚡ Performance Tips**")
+        st.markdown("**Performance Tips**")
         st.caption("• 7-day scan: ~10-20 seconds")
         st.caption("• 14-day scan: ~20-40 seconds")
         st.caption("• 30-day scan: ~60-90 seconds")
@@ -435,7 +439,7 @@ def main():
         complexity_score = (estimated_brackets * num_angles) / 1000
         
         if complexity_score > 2.0:
-            st.warning(f"⚠️ Large scan detected ({days_range} days × {num_angles} angles). This may take 2-3 minutes or timeout. Consider: shorter range, fewer angles, or larger step size.")
+            st.warning(f"Large scan detected ({days_range} days × {num_angles} angles). This may take 2-3 minutes or timeout. Consider: shorter range, fewer angles, or larger step size.")
         
         # Convert dates to UTC-aware datetimes
         start_dt = date_to_utc_datetime(st.session_state.start_date, 0, 0, 0)
@@ -445,44 +449,70 @@ def main():
         mode_label = "fingerprint recurrence" if st.session_state.mode == "Fingerprint" else "planetary harmonics"
         
         with st.spinner(f'Calculating {mode_label} with precision refinement...'):
-            results = scan_harmonic_timing_refined(
-                eph, ts, st.session_state.planet1, st.session_state.planet2,
-                target_angles, st.session_state.orb, start_dt, end_dt, st.session_state.step_minutes
-            )
+            try:
+                results = scan_harmonic_timing_refined(
+                    eph, ts, st.session_state.planet1, st.session_state.planet2,
+                    target_angles, st.session_state.orb, start_dt, end_dt, st.session_state.step_minutes
+                )
+            except Exception as e:
+                st.error(f"Scan failed: {str(e)}")
+                results = []
         
         # Defensive: normalize results to list[dict]
         if results is None:
             results = []
         elif not isinstance(results, list):
-            results = list(results)
-        
-        # DEBUG - temporary visibility (remove after verification)
-        st.write("DEBUG | hits:", len(results))
-        if len(results) > 0:
-            st.write("DEBUG | first 3:", results[:3])
+            try:
+                results = list(results)
+            except:
+                results = []
         
         # Build DataFrame with exact column specification
-        df = pd.DataFrame(results, columns=["DateTime (UTC)", "Planet 1", "Planet 2", "Angle", "Δ (deg)"])
+        try:
+            if len(results) > 0:
+                df = pd.DataFrame(results)
+                
+                # Ensure all required columns exist
+                required_cols = ["DateTime (UTC)", "Planet 1", "Planet 2", "Angle", "Δ (deg)"]
+                for col in required_cols:
+                    if col not in df.columns:
+                        st.error(f"Missing column: {col}")
+                        df = pd.DataFrame(columns=required_cols)
+                        break
+                else:
+                    # Sort and format
+                    df["DateTime (UTC)"] = pd.to_datetime(df["DateTime (UTC)"], utc=True)
+                    df = df.sort_values("DateTime (UTC)").reset_index(drop=True)
+                    
+                    # Format display
+                    df["DateTime (UTC)"] = df["DateTime (UTC)"].dt.strftime('%Y-%m-%d %H:%M:%S')
+                    df["Angle"] = df["Angle"].apply(lambda x: f"{x:.1f}")
+                    df["Δ (deg)"] = df["Δ (deg)"].apply(lambda x: f"{x:.3f}")
+            else:
+                df = pd.DataFrame(columns=["DateTime (UTC)", "Planet 1", "Planet 2", "Angle", "Δ (deg)"])
         
-        # Sort and format if not empty
-        if not df.empty:
-            # Ensure tz-aware UTC
-            df["DateTime (UTC)"] = pd.to_datetime(df["DateTime (UTC)"], utc=True)
-            df = df.sort_values("DateTime (UTC)").reset_index(drop=True)
+        except Exception as e:
+            st.error(f"Failed to build DataFrame: {str(e)}")
+            df = pd.DataFrame(columns=["DateTime (UTC)", "Planet 1", "Planet 2", "Angle", "Δ (deg)"])
         
-        # Store in session state for CSV download
-        st.session_state["harmonics_df"] = df
+        # Store in session state
+        st.session_state.harmonics_df = df
         
         # Display results section
+        st.markdown("---")
         st.subheader("Harmonic Timing Results")
         
         event_type = "recurrence event(s)" if st.session_state.mode == "Fingerprint" else "harmonic event(s)"
-        st.success(f"Found {len(df)} {event_type}")
+        
+        if len(df) > 0:
+            st.success(f"Found {len(df)} {event_type}")
+        else:
+            st.info(f"Found 0 {event_type}")
         
         # Always display dataframe
         st.dataframe(df, use_container_width=True, height=400)
         
-        # CSV download button - always available
+        # CSV download button
         csv = df.to_csv(index=False)
         file_prefix = "fingerprint" if st.session_state.mode == "Fingerprint" else "harmonics"
         st.download_button(
